@@ -44,9 +44,14 @@ jobs:
         if: matrix.target == 'sdk'
         run: pnpm --filter @karyl-chan/plugin-sdk test
 
-      - name: Build all plugins
+      # The plugins import @karyl-chan/plugin-sdk via the workspace symlink,
+      # whose package.json `types` points at dist/ — so the SDK must be
+      # built before tsc can resolve it from a plugin package.
+      - name: Build plugins
         if: matrix.target == 'plugins'
-        run: pnpm -r --filter '!@karyl-chan/plugin-sdk' --filter './packages/*' build
+        run: |
+          pnpm --filter @karyl-chan/plugin-sdk build
+          pnpm -r --filter '!@karyl-chan/plugin-sdk' --filter './packages/*' build
 
   docker-smoke:
     runs-on: ubuntu-latest
