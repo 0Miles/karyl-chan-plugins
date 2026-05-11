@@ -38,12 +38,15 @@ services:
       - radio-music:/app/data/music
       - radio-covers:/app/data/covers
     environment:
-      BOT_URL: http://karyl-chan:3000
+      # Only the values that differ from the SDK / plugin defaults are set
+      # here (BOT_URL defaults to http://karyl-chan:3000, PORT to 3000,
+      # MUSIC_DIR to /app/data/music, COVER_DIR to /app/data/covers —
+      # all already correct for this compose).
+      #
+      # PLUGIN_URL must be explicit: the SDK default is http://<pluginKey>:3000
+      # = http://karyl-radio:3000, but this service/container is karyl-radio-plugin.
       PLUGIN_URL: http://karyl-radio-plugin:3000
-      PORT: "3000"
       KARYL_PLUGIN_SETUP_SECRET: ${KARYL_PLUGIN_SETUP_SECRET_RADIO:-}
-      MUSIC_DIR: /app/data/music
-      COVER_DIR: /app/data/covers
       # Browser-reachable base URL for the radio WebUI (the /radio manage
       # link and the play-response buttons point here). Defaults to the
       # local port mapping; override behind a reverse proxy / tunnel.
