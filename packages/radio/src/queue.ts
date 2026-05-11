@@ -1,0 +1,235 @@
+/**
+ * Per-guild playback queue + loop state.
+ *
+ * Tracks which URL is "now playing" in each guild, what's lined up
+ * after it, and what was played before it (for "previous"). Supports
+ * three loop modes:
+ *
+ *   off    — when a track ends, advance to the next item (or stop if
+ *            the queue is empty)
+ *   track  — replay the current track until cleared
+ *   queue  — like off, but a finished track is appended back to the
+ *            tail of the queue, so the cycle repeats
+ *
+ * Stations and arbitrary URLs are both stored as `Track` entries with
+ * a label (so the UI can say "Now playing: SomaFM Groove Salad" vs.
+ * just dumping the URL). Library-sourced tracks also carry `trackId`
+ * and `coverUrl` so the WebUI can render the album art and link back.
+ *
+ * State is in-memory and resets on plugin restart; for a stopgap
+ * persistence story future versions could call the bot's plugin KV
+ * RPC, but a music queue is naturally session-scoped so most users
+ * won't notice the gap. A guild's state is dropped only by `/radio
+ * stop` (`reset()`) or a plugin restart — the advance loop merely
+ * stops *ticking* an idle guild (so the play log survives a queue that
+ * ran dry); a bot in many guilds therefore holds one small bounded
+ * `GuildState` per guild that ever started radio. Acceptable for this
+ * scale; revisit (idle-TTL sweep) if it ever isn't.
+ */
+
+export type LoopMode = "off" | "track" | "queue";
+
+export interface Track {
+  url: string;
+  label: string;
+  /** Discord user id who queued it (for "queued by"). */
+  queuedBy: string | null;
+  /** Library track id, when this track came from the downloaded library. */
+  trackId?: string;
+  /** Cover image URL (library metadata), for the WebUI now-playing card. */
+  coverUrl?: string;
+  /**
+   * When true, `url` is a *page* URL (e.g. a YouTube watch URL queued
+   * from a playlist) that must be re-resolved to a playable stream URL
+   * — or to the local library file if it's since been downloaded —
+   * right before playback. Resolution at play time keeps the (signed,
+   * short-lived) stream URLs fresh and avoids N yt-dlp calls up front.
+   */
+  needsResolve?: boolean;
+}
+
+/**
+ * One entry in a guild's session play log. `seq` is a stable, monotonic
+ * id (process-global) used by the WebUI's re-queue buttons so a click
+ * targets the right entry even if the log shifts (cap eviction, a
+ * re-played track moving to the tail) between the snapshot poll and the
+ * click — the route looks it up by `seq`, not by array index.
+ */
+export interface PlayLogEntry {
+  seq: number;
+  track: Track;
+}
+
+export interface GuildState {
+  current: Track | null;
+  queue: Track[];
+  /** Back-stack for the "previous" button — newest last, popped on `previous()`. Capped. */
+  history: Track[];
+  /**
+   * Distinct, recency-ordered log of the tracks played this session
+   * (oldest first, newest last; re-playing a track moves it to the
+   * tail rather than duplicating it), capped at PLAY_LOG_MAX. Unlike
+   * `history` it's never popped — it survives skipping forward and
+   * stepping back, so the WebUI "played this session" list / re-queue
+   * buttons see the full set. Reset by `/radio stop` (`reset()`) or a
+   * plugin restart; NOT cleared just because the queue ran dry.
+   */
+  playLog: PlayLogEntry[];
+  loop: LoopMode;
+}
+
+/** How many played tracks to remember for the "previous" button. */
+const HISTORY_MAX = 50;
+/** How many distinct tracks to keep in the per-session play log. */
+const PLAY_LOG_MAX = 50;
+
+let nextPlayLogSeq = 1;
+
+const states = new Map<string, GuildState>();
+
+function ensure(guildId: string): GuildState {
+  let s = states.get(guildId);
+  if (!s) {
+    s = { current: null, queue: [], history: [], playLog: [], loop: "off" };
+    states.set(guildId, s);
+  }
+  return s;
+}
+
+export function getState(guildId: string): GuildState | null {
+  return states.get(guildId) ?? null;
+}
+
+/**
+ * Replace the current track and start "playing" it (caller drives
+ * playback). When `track` is non-null it's recorded in the session play
+ * log: any existing entry for the same `url` is dropped, then a fresh
+ * entry is appended at the tail (so the log stays distinct and
+ * recency-ordered), evicting the oldest if over PLAY_LOG_MAX.
+ */
+export function setCurrent(guildId: string, track: Track | null): void {
+  const s = ensure(guildId);
+  s.current = track;
+  if (track) {
+    const existingIdx = s.playLog.findIndex((e) => e.track.url === track.url);
+    if (existingIdx !== -1) s.playLog.splice(existingIdx, 1);
+    s.playLog.push({ seq: nextPlayLogSeq++, track });
+    if (s.playLog.length > PLAY_LOG_MAX) {
+      s.playLog.splice(0, s.playLog.length - PLAY_LOG_MAX);
+    }
+  }
+}
+
+export function enqueue(guildId: string, track: Track): number {
+  const s = ensure(guildId);
+  s.queue.push(track);
+  return s.queue.length;
+}
+
+export function requeueFront(guildId: string, track: Track): void {
+  ensure(guildId).queue.unshift(track);
+}
+
+export function clearQueue(guildId: string): void {
+  ensure(guildId).queue.length = 0;
+}
+
+/** Remove the queue entry at `index` (0-based). Returns the removed track or null. */
+export function dequeueAt(guildId: string, index: number): Track | null {
+  const s = ensure(guildId);
+  if (!Number.isInteger(index) || index < 0 || index >= s.queue.length) {
+    return null;
+  }
+  return s.queue.splice(index, 1)[0] ?? null;
+}
+
+export function setLoop(guildId: string, mode: LoopMode): void {
+  ensure(guildId).loop = mode;
+}
+
+export function hasPrevious(guildId: string): boolean {
+  return (states.get(guildId)?.history.length ?? 0) > 0;
+}
+
+function pushHistory(s: GuildState, track: Track): void {
+  s.history.push(track);
+  if (s.history.length > HISTORY_MAX) {
+    s.history.splice(0, s.history.length - HISTORY_MAX);
+  }
+}
+
+/**
+ * Pop the next track per loop-mode rules. Does NOT update s.current —
+ * caller must call setCurrent() after confirming playback succeeded.
+ * The finishing track is pushed to `history` (unless loop='track').
+ */
+export function advance(guildId: string): Track | null {
+  const s = ensure(guildId);
+  const finished = s.current;
+  if (s.loop === "track" && finished) {
+    return finished;
+  }
+  let next = s.queue.shift() ?? null;
+  if (finished) {
+    pushHistory(s, finished);
+    if (s.loop === "queue") {
+      s.queue.push(finished);
+      // Sole track on queue-loop: the just-pushed `finished` IS the
+      // next track — otherwise we'd "stop" with a non-empty queue.
+      if (next === null) next = s.queue.shift() ?? null;
+    }
+  }
+  s.current = null;
+  return next;
+}
+
+/**
+ * Step back to the most recently played track. Pops `history`; the
+ * track that was playing (if any) is pushed back to the front of the
+ * queue so "next" returns to it. Does NOT update s.current — caller
+ * must call setCurrent() after confirming playback succeeded. Returns
+ * null when there's nothing to go back to.
+ */
+export function previous(guildId: string): Track | null {
+  const s = ensure(guildId);
+  const prev = s.history.pop() ?? null;
+  if (!prev) return null;
+  if (s.current) s.queue.unshift(s.current);
+  s.current = null;
+  return prev;
+}
+
+export function reset(guildId: string): void {
+  states.delete(guildId);
+}
+
+/**
+ * Drop every reference to a library track (by `trackId`) from all
+ * guilds' queue / history / current — called when the track is deleted
+ * so a now-missing file doesn't sit ghosted in a queue. When it was the
+ * current track, `current` is nulled (the advance loop picks the next).
+ * Returns how many references were removed (for logging).
+ */
+export function purgeTrackId(trackId: string): number {
+  let removed = 0;
+  for (const s of states.values()) {
+    const beforeQ = s.queue.length;
+    s.queue = s.queue.filter((t) => t.trackId !== trackId);
+    removed += beforeQ - s.queue.length;
+    const beforeH = s.history.length;
+    s.history = s.history.filter((t) => t.trackId !== trackId);
+    removed += beforeH - s.history.length;
+    const beforeP = s.playLog.length;
+    s.playLog = s.playLog.filter((e) => e.track.trackId !== trackId);
+    removed += beforeP - s.playLog.length;
+    if (s.current?.trackId === trackId) {
+      s.current = null;
+      removed += 1;
+    }
+    // If purging emptied this session, drop loop to "off" — otherwise the
+    // advance loop never prunes a loop=track/queue state with nothing to
+    // play and the bot ticks idly forever.
+    if (!s.current && s.queue.length === 0) s.loop = "off";
+  }
+  return removed;
+}

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '9.15.0'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    name: Build & test (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [sdk, plugins]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        if: matrix.target == 'sdk'
+        run: pnpm --filter @karyl-chan/plugin-sdk build
+
+      - name: Test SDK
+        if: matrix.target == 'sdk'
+        run: pnpm --filter @karyl-chan/plugin-sdk test
+
+      - name: Build all plugins
+        if: matrix.target == 'plugins'
+        run: pnpm -r --filter '!@karyl-chan/plugin-sdk' --filter './packages/*' build
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    name: Docker smoke build (radio)
+    needs: build-and-test
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build radio image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.radio
+          push: false
+          tags: karyl-radio-plugin:ci
+          cache-from: type=gha,scope=plugin-radio
+          cache-to: type=gha,mode=max,scope=plugin-radio

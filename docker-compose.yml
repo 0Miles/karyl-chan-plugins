@@ -1,0 +1,58 @@
+# Plugin services. Each plugin gets its own container and image so it
+# can be deployed, scaled, and updated independently. Currently the
+# monorepo ships one plugin: radio.
+#
+# Every service requires a profile — `docker compose up` with no
+# COMPOSE_PROFILES starts nothing.  Set it in .env (see .env.example).
+#
+# The bot itself runs in karyl-chan/docker-compose.yml and creates the
+# `karyl-chan-net` network — bring it up first.
+
+x-plugin-base: &plugin-base
+  restart: unless-stopped
+  networks:
+    - karyl-chan-net
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        node -e "require('http').get('http://localhost:3000/health',
+        r => process.exit(r.statusCode === 200 ? 0 : 1))
+        .on('error', () => process.exit(1))"
+    interval: 10s
+    timeout: 3s
+    retries: 5
+    start_period: 10s
+
+services:
+  karyl-radio-plugin:
+    <<: *plugin-base
+    profiles: [radio]
+    container_name: karyl-radio-plugin
+    build:
+      context: .
+      dockerfile: Dockerfile.radio
+    ports:
+      - "903:3000"
+    volumes:
+      - radio-music:/app/data/music
+      - radio-covers:/app/data/covers
+    environment:
+      BOT_URL: http://karyl-chan:3000
+      PLUGIN_URL: http://karyl-radio-plugin:3000
+      PORT: "3000"
+      KARYL_PLUGIN_SETUP_SECRET: ${KARYL_PLUGIN_SETUP_SECRET_RADIO:-}
+      MUSIC_DIR: /app/data/music
+      COVER_DIR: /app/data/covers
+      # Browser-reachable base URL for the radio WebUI (the /radio manage
+      # link and the play-response buttons point here). Defaults to the
+      # local port mapping; override behind a reverse proxy / tunnel.
+      RADIO_PUBLIC_URL: ${RADIO_PUBLIC_URL:-http://localhost:903}
+
+volumes:
+  radio-music:   # downloaded audio files
+  radio-covers:  # uploaded cover images
+
+networks:
+  karyl-chan-net:
+    external: true
