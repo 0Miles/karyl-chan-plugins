@@ -16,6 +16,7 @@ import {
   enqueue,
   getState,
   requeueFront,
+  setAutoplay,
   setCurrent,
   setLoop,
 } from "./queue.js";
@@ -36,7 +37,11 @@ import {
 } from "./playback-actions.js";
 import * as nowPlaying from "./now-playing.js";
 import { PLUGIN_KEY } from "./constants.js";
-import { isHttpUrl, isYouTubePlaylistUrl } from "./downloader.js";
+import {
+  isHttpUrl,
+  isYouTubePlaylistUrl,
+  isYouTubeUrlWithList,
+} from "./downloader.js";
 import { downloadAndStore } from "./library.js";
 import {
   effectiveBase,
@@ -214,7 +219,7 @@ async function resolveSourceOrError(
 // the action we PATCH the message the button was on (by returning the
 // re-rendered embed) and `sync` the public message if it's a different one.
 
-type ControlAction = "prev" | "pause" | "next" | "stop" | "loop";
+type ControlAction = "prev" | "pause" | "next" | "stop" | "loop" | "autoplay";
 
 function controlHandler(
   action: ControlAction,
@@ -299,6 +304,8 @@ function controlHandler(
     } else if (action === "loop") {
       const cur: LoopMode = getState(guildId)?.loop ?? "off";
       setLoop(guildId, cycleLoopMode(cur));
+    } else if (action === "autoplay") {
+      setAutoplay(guildId, !(getState(guildId)?.autoplay ?? false));
     }
 
     const reply = await syncNowPlaying(guildId, ctx.botRpc, {
@@ -313,7 +320,7 @@ export default function buildPlugin() {
   return definePlugin({
     key: PLUGIN_KEY,
     name: "Karyl Radio",
-    version: "0.6.0",
+    version: "0.7.0",
     description:
       "Internet radio + YouTube audio library with WebUI management & playback control.",
     rpcMethodsUsed: [
@@ -337,6 +344,10 @@ export default function buildPlugin() {
       definePluginComponent({ id: "next", handler: controlHandler("next") }),
       definePluginComponent({ id: "stop", handler: controlHandler("stop") }),
       definePluginComponent({ id: "loop", handler: controlHandler("loop") }),
+      definePluginComponent({
+        id: "autoplay",
+        handler: controlHandler("autoplay"),
+      }),
     ],
     capabilities: [
       definePluginCapability({
@@ -437,6 +448,27 @@ export default function buildPlugin() {
                       { name: "off — no looping", value: "off" },
                       { name: "track — repeat current", value: "track" },
                       { name: "queue — cycle the queue", value: "queue" },
+                    ],
+                  },
+                ],
+              },
+              {
+                type: "sub_command",
+                name: "autoplay",
+                description:
+                  "Auto-queue YouTube recommendations when the queue runs out",
+                options: [
+                  {
+                    type: "string",
+                    name: "mode",
+                    description: "Turn autoplay on or off",
+                    required: true,
+                    choices: [
+                      {
+                        name: "on — keep playing related YouTube songs",
+                        value: "on",
+                      },
+                      { name: "off — stop when the queue ends", value: "off" },
                     ],
                   },
                 ],
@@ -603,6 +635,24 @@ export default function buildPlugin() {
                   });
                 }
 
+                case "autoplay": {
+                  const mode =
+                    typeof ctx.options.mode === "string"
+                      ? ctx.options.mode
+                      : "";
+                  if (mode !== "on" && mode !== "off") {
+                    return "⚠ mode must be `on` or `off`.";
+                  }
+                  setAutoplay(guildId, mode === "on");
+                  await syncNowPlaying(guildId, ctx.botRpc);
+                  return playbackReply(ctx, guildId, {
+                    description:
+                      mode === "on"
+                        ? "♾️ Autoplay **on** — when the queue runs out I'll keep playing YouTube recommendations seeded from the last YouTube track."
+                        : "Autoplay **off** — playback stops when the queue ends.",
+                  });
+                }
+
                 case "stop": {
                   await doStop(guildId, ctx.botRpc);
                   sessionTokens.delete(guildId);
@@ -688,6 +738,14 @@ export default function buildPlugin() {
 
                 case "play": {
                   const source = parseSource(ctx);
+                  // A YouTube link carrying `list=` (a Mix/radio share or a
+                  // /playlist URL) implies "keep this going" → switch autoplay
+                  // on; any other source turns it off (a fresh play resets it).
+                  const autoOn = isYouTubeUrlWithList(source);
+                  setAutoplay(guildId, autoOn);
+                  const autoNote = autoOn
+                    ? "\n♾️ Autoplay on — I'll keep going with YouTube recommendations when the queue runs out."
+                    : "";
                   const joinFirst = async (): Promise<string | null> => {
                     const joined = await ctx.botRpc("/api/plugin/voice.join", {
                       guild_id: guildId,
@@ -732,9 +790,11 @@ export default function buildPlugin() {
                       title: started
                         ? "▶️ Playing playlist"
                         : "▶️ Playlist queued",
-                      description: started
-                        ? `**${started.label}** — ${tracks.length} track${tracks.length === 1 ? "" : "s"} queued.`
-                        : `Queued ${tracks.length} track${tracks.length === 1 ? "" : "s"}, but couldn't start the first one.`,
+                      description:
+                        (started
+                          ? `**${started.label}** — ${tracks.length} track${tracks.length === 1 ? "" : "s"} queued.`
+                          : `Queued ${tracks.length} track${tracks.length === 1 ? "" : "s"}, but couldn't start the first one.`) +
+                        autoNote,
                       ...(started?.coverUrl
                         ? { thumbnail: { url: started.coverUrl } }
                         : {}),
@@ -751,9 +811,11 @@ export default function buildPlugin() {
                   await syncNowPlaying(guildId, ctx.botRpc);
                   return playbackReply(ctx, guildId, {
                     title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",
-                    description: o.ok
-                      ? `**${o.track.label}**`
-                      : `Joined voice but failed to start **${resolved.label}**.`,
+                    description:
+                      (o.ok
+                        ? `**${o.track.label}**`
+                        : `Joined voice but failed to start **${resolved.label}**.`) +
+                      autoNote,
                     ...(o.ok && o.track.coverUrl
                       ? { thumbnail: { url: o.track.coverUrl } }
                       : {}),

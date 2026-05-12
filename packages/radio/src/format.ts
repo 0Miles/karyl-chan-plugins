@@ -96,6 +96,7 @@ export function formatQueueList(guildId: string): string {
     }
   }
   lines.push(`Loop: \`${s.loop}\``);
+  if (s.autoplay) lines.push("Autoplay: `on`");
   return lines.join("\n");
 }
 
@@ -136,6 +137,7 @@ export function renderNowPlayingEmbed(
       : `_queue: ${queueSize} track${queueSize > 1 ? "s" : ""}_`,
   );
   lines.push(`${loopBadge(loop)} loop \`${loop}\``);
+  if (s?.autoplay) lines.push("♾️ autoplay on");
 
   return {
     title: paused ? "⏸️ Paused" : "🎶 Now playing",
@@ -148,11 +150,11 @@ export function renderNowPlayingEmbed(
 /**
  * Build the two action rows for the now-playing message:
  *   row 1 — ⏮ prev · ⏯ play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle
- *   row 2 — 🎛 WebUI (link button; only when `webuiUrl` is non-null)
+ *   row 2 — ♾️ autoplay-toggle · 🎛 WebUI (link button; only when `webuiUrl` is non-null)
  * The control buttons carry `kc:<pluginKey>:<action>` custom ids (built
  * via the SDK's componentCustomId) and stay live for as long as the
- * message exists. `prev` is disabled with no play history; the loop
- * button goes blurple (style 1) while looping; stop is red (style 4).
+ * message exists. `prev` is disabled with no play history; the loop and
+ * autoplay buttons go blurple (style 1) while active; stop is red (style 4).
  */
 export function nowPlayingComponents(
   pluginKey: string,
@@ -162,6 +164,7 @@ export function nowPlayingComponents(
 ): unknown[] {
   const s = getState(guildId);
   const loop: LoopMode = s?.loop ?? "off";
+  const autoplay = s?.autoplay ?? false;
   const hasPrev = (s?.history.length ?? 0) > 0;
   const btn = (
     id: string,
@@ -186,11 +189,10 @@ export function nowPlayingComponents(
       ],
     },
   ];
+  const row2: unknown[] = [btn("autoplay", "♾️", { style: autoplay ? 1 : 2 })];
   if (webuiUrl) {
-    rows.push({
-      type: 1,
-      components: [{ type: 2, style: 5, label: "🎛 WebUI", url: webuiUrl }],
-    });
+    row2.push({ type: 2, style: 5, label: "🎛 WebUI", url: webuiUrl });
   }
+  rows.push({ type: 1, components: row2 });
   return rows;
 }
