@@ -48,7 +48,7 @@ interface InteractionPayload {
   sub_command_name: string | null;
   options: Array<{ name: string; type: number; value?: unknown }>;
   guild_id: string | null;
-  user: { id: string };
+  user: { id: string; username?: string; global_name?: string | null };
   /** Bot-resolved subset of the invoker's RBAC tokens: `admin` + this plugin's `plugin:<key>:*`. */
   member?: { capabilities?: string[] };
 }
@@ -283,6 +283,8 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
         options: readOpts(payload),
         guildId: payload.guild_id,
         userId: payload.user.id,
+        userDisplayName:
+          payload.user.global_name || payload.user.username || payload.user.id,
         capabilities,
         hasCapability: (capKey: string): boolean =>
           capabilities.includes("admin") ||

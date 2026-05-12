@@ -24,6 +24,15 @@ export interface CommandContext {
   /** Discord user ID of the invoker */
   userId: string;
   /**
+   * Human-readable display name of the invoker — the Discord *global*
+   * display name when set, else the legacy username, else the user id as
+   * a last resort. Use this for "queued by …" / audit text instead of
+   * the raw id or a `<@id>` mention (mentions only render inside Discord
+   * messages, not in a plugin's own WebUI). Falls back to the id when
+   * talking to an older bot that doesn't send the name.
+   */
+  userDisplayName: string;
+  /**
    * The invoker's plugin-relevant RBAC capabilities for THIS dispatch, as
    * the bot resolved them: the `admin` superuser token (if held) plus this
    * plugin's own `plugin:<pluginKey>:*` grants. Only populated when the
