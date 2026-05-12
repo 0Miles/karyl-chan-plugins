@@ -440,6 +440,7 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
         guildId: payload.guild_id,
         channelId: payload.channel_id,
         messageId: payload.message_id,
+        interactionToken: payload.interaction_token,
         userId: payload.user.id,
         userDisplayName:
           payload.user.global_name || payload.user.username || payload.user.id,

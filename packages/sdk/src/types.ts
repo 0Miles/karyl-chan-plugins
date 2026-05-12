@@ -199,6 +199,15 @@ export interface ComponentContext {
   channelId: string | null;
   /** Id of the message the button is attached to. */
   messageId: string;
+  /**
+   * The (fresh, 15-min) interaction token for this click. The bot has
+   * already `deferUpdate`d the interaction; pass this token to
+   * `/api/plugin/interactions.followup` for an ephemeral nudge — e.g.
+   * `ctx.botRpc("/api/plugin/interactions.followup", { interaction_token:
+   * ctx.interactionToken, content, ephemeral: true })`. (Editing the
+   * button's message is easier via the handler's return value.)
+   */
+  interactionToken: string;
   /** Discord user id of whoever clicked. */
   userId: string;
   /** Display name of the clicker — global display name → username → id. */
