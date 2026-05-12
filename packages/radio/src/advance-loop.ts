@@ -10,6 +10,7 @@ import {
 } from "./queue.js";
 import {
   playTrack,
+  resolveAnyTrack,
   resolveAutoplayRecommendations,
   youtubeVideoIdOf,
 } from "./resolver.js";
@@ -17,13 +18,42 @@ import * as nowPlaying from "./now-playing.js";
 
 type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
 
-const ADVANCE_INTERVAL_MS = 5_000;
+// Poll fast so a finished track is followed up within ~1 s rather than up
+// to 5 s. Cheap — `voice.status` is an in-memory lookup on the bot; the
+// inFlight guard below means a tick that runs long (a yt-dlp resolve)
+// just makes the next ticks skip that guild rather than pile up.
+const ADVANCE_INTERVAL_MS = 1_000;
 
-// Guilds currently being processed. A tick now does a yt-dlp stream
-// resolution for lazy (playlist) tracks, which can take longer than the
-// 5 s interval — without this guard a slow guild's next tick would run
-// concurrently and double-play / clobber `current`.
+// Guilds currently being processed. A tick can do a yt-dlp stream
+// resolution for lazy (playlist / autoplay) tracks, which takes longer
+// than the tick interval — without this guard a slow guild's next tick
+// would run concurrently and double-play / clobber `current`.
 const inFlight = new Set<string>();
+
+// Pre-resolved next-up track per guild: while the current track plays we
+// kick off the (slow) yt-dlp resolve for `queue[0]` so it's ready the
+// moment the current one ends. Keyed by guild → { the lazy entry's url,
+// the in-flight/settled resolution }. Cleared when the head changes
+// (url-mismatch on consume) or the session ends.
+const prefetched = new Map<
+  string,
+  { url: string; promise: Promise<Track | null> }
+>();
+
+/** Ensure the guild's next-up lazy track is being pre-resolved. */
+function ensurePrefetch(guildId: string): void {
+  const head = getState(guildId)?.queue[0];
+  if (!head?.needsResolve) {
+    prefetched.delete(guildId);
+    return;
+  }
+  const pf = prefetched.get(guildId);
+  if (pf && pf.url === head.url) return; // already prefetching this one
+  prefetched.set(guildId, {
+    url: head.url,
+    promise: resolveAnyTrack(head.url, head.queuedBy).catch(() => null),
+  });
+}
 
 /** True when this guild has nothing left to play and isn't looping. */
 function isIdle(guildId: string): boolean {
@@ -123,6 +153,7 @@ async function processGuild(
     // message goes away and we stop ticking).
     if (isIdle(guildId)) {
       seenGuilds.delete(guildId);
+      prefetched.delete(guildId);
       await nowPlaying.teardown(guildId, botRpc).catch(() => {});
       return;
     }
@@ -141,6 +172,7 @@ async function processGuild(
       // now-playing message — keep the queue state so a fresh `/radio
       // play` resumes into it.
       seenGuilds.delete(guildId);
+      prefetched.delete(guildId);
       await nowPlaying.teardown(guildId, botRpc).catch(() => {});
       return;
     }
@@ -151,8 +183,19 @@ async function processGuild(
     if (!status.playing) {
       const next = advance(guildId);
       if (next) {
-        const outcome = await playTrack(next, (url) =>
-          botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
+        // If we pre-resolved this exact entry while the last track was
+        // playing, use that — no fresh yt-dlp call between songs.
+        const pf = prefetched.get(guildId);
+        prefetched.delete(guildId);
+        const hint =
+          next.needsResolve && pf && pf.url === next.url
+            ? { resolved: await pf.promise }
+            : undefined;
+        const outcome = await playTrack(
+          next,
+          (url) =>
+            botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
+          hint,
         );
         if (outcome.ok) {
           setCurrent(guildId, outcome.track);
@@ -178,9 +221,12 @@ async function processGuild(
     // is done: tear down rather than flashing a "nothing playing" card.
     if (isIdle(guildId)) {
       seenGuilds.delete(guildId);
+      prefetched.delete(guildId);
       await nowPlaying.teardown(guildId, botRpc).catch(() => {});
       return;
     }
+    // Pre-resolve the (new) next-up track so the next hand-off is gapless.
+    ensurePrefetch(guildId);
     // Keep the public now-playing message current (cheap — hash-gated;
     // reuses the voice status we already fetched).
     await nowPlaying.sync(guildId, botRpc, { status }).catch(() => {});

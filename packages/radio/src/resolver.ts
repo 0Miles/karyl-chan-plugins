@@ -220,10 +220,17 @@ export type PlayOutcome =
  * (loop=track) or `/radio back`, it re-resolves a *fresh* stream URL
  * instead of replaying the now-expired one. Only fresher metadata
  * (title / cover) is merged in.
+ *
+ * `prefetched` lets a caller hand in a resolution it already computed
+ * ahead of time (the advance loop pre-resolves the next-up entry while
+ * the current track is still playing, so the gap between tracks isn't a
+ * fresh yt-dlp call). It's only used for a `needsResolve` `track`; pass
+ * `{ resolved: null }` to signal "I tried to pre-resolve and it failed".
  */
 export async function playTrack(
   track: Track,
   voicePlay: (url: string) => Promise<unknown | null>,
+  prefetched?: { resolved: Track | null },
 ): Promise<PlayOutcome> {
   let playUrl: string;
   let toStore: Track;
@@ -239,10 +246,14 @@ export async function playTrack(
     toStore = track;
   } else {
     let resolved: Track | null;
-    try {
-      resolved = await resolveAnyTrack(track.url, track.queuedBy);
-    } catch {
-      return { ok: false, reason: "unresolvable" };
+    if (prefetched !== undefined) {
+      resolved = prefetched.resolved;
+    } else {
+      try {
+        resolved = await resolveAnyTrack(track.url, track.queuedBy);
+      } catch {
+        return { ok: false, reason: "unresolvable" };
+      }
     }
     if (!resolved) return { ok: false, reason: "unresolvable" };
     if (resolved.trackId) {
