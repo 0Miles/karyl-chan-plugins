@@ -1,26 +1,40 @@
 import {
   type CommandContext,
   type CommandReply,
+  type ComponentContext,
+  type ComponentReply,
   definePlugin,
   definePluginCapability,
   definePluginCommand,
+  definePluginComponent,
   defineGuildFeature,
 } from "@karyl-chan/plugin-sdk";
 import {
+  type LoopMode,
   type Track,
   advance,
   enqueue,
+  getState,
   requeueFront,
   setCurrent,
   setLoop,
 } from "./queue.js";
 import {
-  formatNowPlaying,
+  EMBED_COLOR,
   formatQueueList,
   formatStationList,
   loopBadge,
+  nowPlayingComponents,
+  renderNowPlayingEmbed,
 } from "./format.js";
-import { doNext, doPrev, doStop } from "./playback-actions.js";
+import {
+  cycleLoopMode,
+  doNext,
+  doPause,
+  doPrev,
+  doStop,
+} from "./playback-actions.js";
+import * as nowPlaying from "./now-playing.js";
 import { isHttpUrl, isYouTubePlaylistUrl } from "./downloader.js";
 import { downloadAndStore } from "./library.js";
 import {
@@ -59,12 +73,14 @@ const RADIO_PUBLIC_URL_ENV = process.env.RADIO_PUBLIC_URL
 // effectiveBase() can use it before any SDK wiring happens.
 setPublicUrlEnvFallback(RADIO_PUBLIC_URL_ENV);
 
-const EMBED_COLOR = 0x5865f2;
+type BotRpcFn = (path: string, body?: unknown) => Promise<unknown | null>;
 
 // ── Session WebUI link ────────────────────────────────────────────────────
-// Each play/queue/etc response carries a Link button to the session WebUI.
-// The URL embeds a 6h bot-signed JWT scoped to this guild's playback
-// session; we cache it per guild and re-mint when <30 min remain.
+// Each play/queue/etc response (and /radio np) carries a Link button to
+// the session WebUI. The URL embeds a 6h bot-signed JWT scoped to this
+// guild's playback session; we cache it per guild and re-mint when <30 min
+// remain. (The public now-playing message uses its own longer-lived token
+// — see now-playing.ts — so its button outlasts the whole session.)
 interface CachedToken {
   token: string;
   expiresAt: number;
@@ -73,7 +89,8 @@ const SESSION_TOKEN_REFRESH_MARGIN_MS = 30 * 60_000;
 const sessionTokens = new Map<string, CachedToken>();
 
 async function getSessionToken(
-  ctx: CommandContext,
+  botRpc: BotRpcFn,
+  userId: string,
   guildId: string,
 ): Promise<string | null> {
   const cached = sessionTokens.get(guildId);
@@ -83,8 +100,8 @@ async function getSessionToken(
   ) {
     return cached.token;
   }
-  const res = (await ctx.botRpc("/api/plugin/auth.session", {
-    user_id: ctx.userId,
+  const res = (await botRpc("/api/plugin/auth.session", {
+    user_id: userId,
     kind: "session",
     guild_id: guildId,
   })) as { token?: string; expiresAt?: number } | null;
@@ -96,9 +113,34 @@ async function getSessionToken(
   return res.token;
 }
 
+/** WebUI session URL for a guild, or null if a token couldn't be minted. */
+async function webuiUrlFor(
+  botRpc: BotRpcFn,
+  userId: string,
+  guildId: string,
+): Promise<string | null> {
+  const token = await getSessionToken(botRpc, userId, guildId);
+  return token ? `${effectiveBase()}/?token=${token}` : null;
+}
+
 /** Discord component-v1 action row with a single Link button. */
 function linkButtonRow(label: string, url: string): unknown {
   return { type: 1, components: [{ type: 2, style: 5, label, url }] };
+}
+
+/**
+ * Refresh the public now-playing message after a state change — best
+ * effort; never let a Discord hiccup break the command/loop that called
+ * it. `opts.skipMessageId` lets a button handler tell `sync` "I'll PATCH
+ * that message myself via the interaction token" so it isn't edited
+ * twice.
+ */
+function syncNowPlaying(
+  guildId: string,
+  botRpc: BotRpcFn,
+  opts?: { status?: nowPlaying.VoiceStatusLike; skipMessageId?: string },
+): Promise<{ embeds: unknown[]; components: unknown[] } | null> {
+  return nowPlaying.sync(guildId, botRpc, opts).catch(() => null);
 }
 
 /**
@@ -111,10 +153,8 @@ async function playbackReply(
   guildId: string,
   embed: Record<string, unknown>,
 ): Promise<CommandReply> {
-  const token = await getSessionToken(ctx, guildId);
-  const components = token
-    ? [linkButtonRow("🎛 Open WebUI", `${effectiveBase()}/?token=${token}`)]
-    : undefined;
+  const url = await webuiUrlFor(ctx.botRpc, ctx.userId, guildId);
+  const components = url ? [linkButtonRow("🎛 Open WebUI", url)] : undefined;
   // Ephemeral: plugin command replies are deferred ephemeral by the bot,
   // and the button embeds a session token — keep it visible only to the
   // ManageGuild member who invoked it.
@@ -167,6 +207,88 @@ async function resolveSourceOrError(
   return track;
 }
 
+// ── Now-playing message control buttons ───────────────────────────────────
+// The ⏮ / ⏯ / ⏭ / ⏹ / 🔁 buttons on the public now-playing message (and
+// on /radio np) all flow through here. Only members currently in the
+// bot's voice channel may use them — others get an ephemeral nudge. After
+// the action we PATCH the message the button was on (by returning the
+// re-rendered embed) and `sync` the public message if it's a different one.
+
+type ControlAction = "prev" | "pause" | "next" | "stop" | "loop";
+
+function controlHandler(
+  action: ControlAction,
+): (ctx: ComponentContext) => Promise<ComponentReply> {
+  return async (ctx): Promise<ComponentReply> => {
+    const guildId = ctx.guildId;
+    if (!guildId) return; // buttons only live on guild messages
+    const nudge = (content: string): Promise<unknown | null> =>
+      ctx
+        .botRpc("/api/plugin/interactions.followup", {
+          interaction_token: ctx.interactionToken,
+          content,
+          ephemeral: true,
+        })
+        .catch(() => null);
+
+    const status = (await ctx.botRpc("/api/plugin/voice.status", {
+      guild_id: guildId,
+    }).catch(() => null)) as {
+      connected?: boolean;
+      channelId?: string | null;
+      paused?: boolean;
+    } | null;
+    if (!status || !status.connected || !status.channelId) {
+      await nudge("⚠ 我已經不在語音頻道了，這個面板已失效。");
+      return;
+    }
+    if (ctx.voiceChannelId !== status.channelId) {
+      await nudge(`⚠ 你要先加入 <#${status.channelId}> 才能控制播放。`);
+      return;
+    }
+
+    seenGuilds.add(guildId);
+
+    if (action === "stop") {
+      await doStop(guildId, ctx.botRpc);
+      sessionTokens.delete(guildId);
+      const onPublicMessage =
+        nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
+      await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+      // The public message is now deleted — if the click was on it there's
+      // nothing left to PATCH; if it was on a /radio np message, leave a notice.
+      return onPublicMessage
+        ? undefined
+        : {
+            embeds: [
+              { color: EMBED_COLOR, description: "⏹ 已停止播放並離開語音頻道。" },
+            ],
+            components: [],
+          };
+    }
+
+    let paused = status.paused === true;
+    if (action === "next") {
+      await doNext(guildId, ctx.botRpc);
+      paused = false; // a fresh voice.play isn't paused
+    } else if (action === "prev") {
+      await doPrev(guildId, ctx.botRpc);
+      paused = false;
+    } else if (action === "pause") {
+      ({ paused } = await doPause(guildId, ctx.botRpc));
+    } else if (action === "loop") {
+      const cur: LoopMode = getState(guildId)?.loop ?? "off";
+      setLoop(guildId, cycleLoopMode(cur));
+    }
+
+    const reply = await syncNowPlaying(guildId, ctx.botRpc, {
+      status: { connected: true, channelId: status.channelId, paused },
+      skipMessageId: ctx.messageId,
+    });
+    return reply ?? undefined;
+  };
+}
+
 export default function buildPlugin() {
   return definePlugin({
     key: PLUGIN_KEY,
@@ -178,13 +300,24 @@ export default function buildPlugin() {
       "voice.join",
       "voice.leave",
       "voice.play",
+      "voice.pause",
       "voice.stop",
       "voice.status",
+      "messages.send",
+      "messages.edit",
+      "messages.delete",
       "interactions.respond",
       "interactions.followup",
       "auth.session",
     ],
     storage: { guildKv: false },
+    components: [
+      definePluginComponent({ id: "prev", handler: controlHandler("prev") }),
+      definePluginComponent({ id: "pause", handler: controlHandler("pause") }),
+      definePluginComponent({ id: "next", handler: controlHandler("next") }),
+      definePluginComponent({ id: "stop", handler: controlHandler("stop") }),
+      definePluginComponent({ id: "loop", handler: controlHandler("loop") }),
+    ],
     capabilities: [
       definePluginCapability({
         key: "webui.access",
@@ -366,16 +499,32 @@ export default function buildPlugin() {
                 }
 
                 case "np": {
+                  // Same embed + control buttons as the public now-playing
+                  // message, but ephemeral and not auto-updated — only its
+                  // own buttons edit it.
                   const status = (await ctx.botRpc("/api/plugin/voice.status", {
                     guild_id: guildId,
-                  })) as { channelId?: string | null } | null;
-                  return playbackReply(ctx, guildId, {
-                    title: "🎶 Now playing",
-                    description: formatNowPlaying(
+                  })) as { channelId?: string | null; paused?: boolean } | null;
+                  const webuiUrl = await webuiUrlFor(
+                    ctx.botRpc,
+                    userId,
+                    guildId,
+                  );
+                  return {
+                    embeds: [
+                      renderNowPlayingEmbed(guildId, {
+                        channelId: status?.channelId ?? null,
+                        paused: !!status?.paused,
+                      }),
+                    ],
+                    components: nowPlayingComponents(
+                      PLUGIN_KEY,
                       guildId,
-                      status?.channelId ?? null,
+                      { paused: !!status?.paused },
+                      webuiUrl,
                     ),
-                  });
+                    ephemeral: true,
+                  };
                 }
 
                 case "queuelist":
@@ -428,6 +577,7 @@ export default function buildPlugin() {
                     return "⚠ mode must be one of: off / track / queue";
                   }
                   setLoop(guildId, mode);
+                  await syncNowPlaying(guildId, ctx.botRpc);
                   return playbackReply(ctx, guildId, {
                     description: `${loopBadge(mode)} Loop mode set to **${mode}**.`,
                   });
@@ -436,13 +586,19 @@ export default function buildPlugin() {
                 case "stop": {
                   await doStop(guildId, ctx.botRpc);
                   sessionTokens.delete(guildId);
+                  await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
                   return "✓ Stopped, queue cleared, and left voice.";
                 }
 
                 case "skip": {
                   const r = await doNext(guildId, ctx.botRpc);
-                  if (r.kind === "queue-empty")
+                  if (r.kind === "queue-empty") {
+                    await nowPlaying
+                      .teardown(guildId, ctx.botRpc)
+                      .catch(() => {});
                     return "Queue empty — stopped playback.";
+                  }
+                  await syncNowPlaying(guildId, ctx.botRpc);
                   if (r.kind === "playing")
                     return playbackReply(ctx, guildId, {
                       description: `⏭ Skipped. Now playing **${r.track.label}**.`,
@@ -465,6 +621,7 @@ export default function buildPlugin() {
                   const r = await doPrev(guildId, ctx.botRpc);
                   if (r.kind === "no-history")
                     return "↩ Nothing in the play history to go back to.";
+                  await syncNowPlaying(guildId, ctx.botRpc);
                   return playbackReply(ctx, guildId, {
                     description:
                       r.kind === "playing"
@@ -491,6 +648,7 @@ export default function buildPlugin() {
                       t.queuedByName = ctx.userDisplayName;
                       enqueue(guildId, t);
                     }
+                    await syncNowPlaying(guildId, ctx.botRpc);
                     return playbackReply(ctx, guildId, {
                       description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
                     });
@@ -499,6 +657,7 @@ export default function buildPlugin() {
                   if (typeof resolved === "string") return resolved;
                   resolved.queuedByName = ctx.userDisplayName;
                   const position = enqueue(guildId, resolved);
+                  await syncNowPlaying(guildId, ctx.botRpc);
                   return playbackReply(ctx, guildId, {
                     description: `➕ Queued **${resolved.label}** (position ${position}).`,
                     ...(resolved.coverUrl
@@ -548,6 +707,7 @@ export default function buildPlugin() {
                         break;
                       }
                     }
+                    await syncNowPlaying(guildId, ctx.botRpc);
                     return playbackReply(ctx, guildId, {
                       title: started
                         ? "▶️ Playing playlist"
@@ -568,6 +728,7 @@ export default function buildPlugin() {
                   if (joinErr) return joinErr;
                   const o = await startTrack(ctx, guildId, resolved);
                   if (o.ok) setCurrent(guildId, o.track);
+                  await syncNowPlaying(guildId, ctx.botRpc);
                   return playbackReply(ctx, guildId, {
                     title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",
                     description: o.ok

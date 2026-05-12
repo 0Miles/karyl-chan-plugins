@@ -1,9 +1,15 @@
 /**
- * Pure formatting helpers used by the radio plugin's command handlers.
- * No bot RPC, no state mutation — every input → string output.
+ * Pure presentation helpers used by the radio plugin: command-reply text,
+ * the now-playing embed and the control-button rows. No bot RPC, no state
+ * mutation — derived purely from the queue state (and the bits of voice
+ * status / WebUI link the caller passes in).
  */
+import { componentCustomId } from "@karyl-chan/plugin-sdk";
 import { type LoopMode, type Track, getState } from "./queue.js";
 import { STATIONS, findStation } from "./stations.js";
+
+/** Embed colour shared across the radio plugin's Discord replies. */
+export const EMBED_COLOR = 0x5865f2;
 
 export function formatStationList(): string {
   const lines = STATIONS.map(
@@ -91,4 +97,100 @@ export function formatQueueList(guildId: string): string {
   }
   lines.push(`Loop: \`${s.loop}\``);
   return lines.join("\n");
+}
+
+// ── Now-playing embed + control buttons ─────────────────────────────────────
+// Shared by the public "now playing" message (now-playing.ts) and the
+// /radio np reply. `<@id>` mentions are deliberate — these render inside a
+// Discord message, where a mention is the right form (unlike the WebUI).
+
+/** Voice-status bits the now-playing embed needs. */
+export interface NowPlayingStatus {
+  /** The voice channel the bot is in (for the "in <#…>" line), or null. */
+  channelId: string | null;
+  /** True when the current track is paused. */
+  paused?: boolean;
+}
+
+/** Build the "now playing" embed from the guild's queue state + voice status. */
+export function renderNowPlayingEmbed(
+  guildId: string,
+  status: NowPlayingStatus,
+): Record<string, unknown> {
+  const s = getState(guildId);
+  const cur = s?.current ?? null;
+  const loop = s?.loop ?? "off";
+  const queueSize = s?.queue.length ?? 0;
+  const paused = status.paused === true;
+
+  const lines: string[] = [];
+  lines.push(
+    cur
+      ? `🎵 **${cur.label}**${cur.queuedBy ? ` _(queued by <@${cur.queuedBy}>)_` : ""}`
+      : "_(nothing playing)_",
+  );
+  if (status.channelId) lines.push(`in <#${status.channelId}>`);
+  lines.push(
+    queueSize === 0
+      ? "_queue empty_"
+      : `_queue: ${queueSize} track${queueSize > 1 ? "s" : ""}_`,
+  );
+  lines.push(`${loopBadge(loop)} loop \`${loop}\``);
+
+  return {
+    title: paused ? "⏸️ Paused" : "🎶 Now playing",
+    color: EMBED_COLOR,
+    description: lines.join("\n"),
+    ...(cur?.coverUrl ? { thumbnail: { url: cur.coverUrl } } : {}),
+  };
+}
+
+/**
+ * Build the two action rows for the now-playing message:
+ *   row 1 — ⏮ prev · ⏯ play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle
+ *   row 2 — 🎛 WebUI (link button; only when `webuiUrl` is non-null)
+ * The control buttons carry `kc:<pluginKey>:<action>` custom ids (built
+ * via the SDK's componentCustomId) and stay live for as long as the
+ * message exists. `prev` is disabled with no play history; the loop
+ * button goes blurple (style 1) while looping; stop is red (style 4).
+ */
+export function nowPlayingComponents(
+  pluginKey: string,
+  guildId: string,
+  status: { paused?: boolean },
+  webuiUrl: string | null,
+): unknown[] {
+  const s = getState(guildId);
+  const loop: LoopMode = s?.loop ?? "off";
+  const hasPrev = (s?.history.length ?? 0) > 0;
+  const btn = (
+    id: string,
+    emoji: string,
+    opts?: { style?: number; disabled?: boolean },
+  ): Record<string, unknown> => ({
+    type: 2,
+    style: opts?.style ?? 2,
+    custom_id: componentCustomId(pluginKey, id),
+    emoji: { name: emoji },
+    ...(opts?.disabled ? { disabled: true } : {}),
+  });
+  const rows: unknown[] = [
+    {
+      type: 1,
+      components: [
+        btn("prev", "⏮️", { disabled: !hasPrev }),
+        btn("pause", status.paused ? "▶️" : "⏸️"),
+        btn("next", "⏭️"),
+        btn("stop", "⏹️", { style: 4 }),
+        btn("loop", "🔁", { style: loop === "off" ? 2 : 1 }),
+      ],
+    },
+  ];
+  if (webuiUrl) {
+    rows.push({
+      type: 1,
+      components: [{ type: 2, style: 5, label: "🎛 WebUI", url: webuiUrl }],
+    });
+  }
+  return rows;
 }

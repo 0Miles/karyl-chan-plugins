@@ -38,6 +38,7 @@ import {
   setLoop,
 } from "./queue.js";
 import { doNext, doPrev } from "./playback-actions.js";
+import * as nowPlaying from "./now-playing.js";
 import {
   isYouTubePlaylistUrl,
   resolveAnyTrack,
@@ -148,6 +149,19 @@ async function sessionSnapshot(
       seq: e.seq,
     })),
   };
+}
+
+/**
+ * Sync the public now-playing message (best effort), then return the
+ * session snapshot — the response shape every WebUI playback-mutating
+ * route hands back. The plain `sessionSnapshot` (no sync) backs the GET
+ * poll, which must NOT edit Discord on every refresh.
+ */
+async function syncAndSnapshot(
+  guildId: string,
+): Promise<Record<string, unknown>> {
+  if (_botRpc) await nowPlaying.sync(guildId, _botRpc).catch(() => null);
+  return sessionSnapshot(guildId);
 }
 
 /** Max upload size for a cover image. */
@@ -457,7 +471,7 @@ export async function registerWebRoutes(
       if (!_botRpc)
         return reply.code(503).send({ error: "bot RPC unavailable" });
       await doNext(guildId, _botRpc);
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -472,7 +486,7 @@ export async function registerWebRoutes(
       const r = await doPrev(guildId, _botRpc);
       if (r.kind === "no-history")
         return reply.code(409).send({ error: "Nothing to go back to" });
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -496,7 +510,7 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "mode must be off/track/queue" });
       }
       setLoop(guildId, mode as LoopMode);
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -535,7 +549,7 @@ export async function registerWebRoutes(
             .send({ error: "Playlist is empty or unavailable" });
         }
         for (const t of tracks) enqueue(guildId, t);
-        return sessionSnapshot(guildId);
+        return syncAndSnapshot(guildId);
       }
       let track: Track | null;
       try {
@@ -549,7 +563,7 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "Unknown station/track/URL" });
       }
       enqueue(guildId, track);
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -563,7 +577,7 @@ export async function registerWebRoutes(
       const removed = dequeueAt(guildId, idx);
       if (!removed)
         return reply.code(404).send({ error: "No such queue item" });
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -573,7 +587,7 @@ export async function registerWebRoutes(
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
       clearQueue(guildId);
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -595,7 +609,7 @@ export async function registerWebRoutes(
           .send({ error: "No such played track (refresh and retry)" });
       }
       enqueue(guildId, { ...entry.track });
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
@@ -609,7 +623,7 @@ export async function registerWebRoutes(
       for (const e of getState(guildId)?.playLog ?? []) {
         enqueue(guildId, { ...e.track });
       }
-      return sessionSnapshot(guildId);
+      return syncAndSnapshot(guildId);
     },
   );
 
