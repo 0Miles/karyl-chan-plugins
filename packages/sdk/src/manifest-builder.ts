@@ -1,5 +1,4 @@
 import type {
-  ManifestBehavior,
   ManifestCapability,
   ManifestCommand,
   ManifestGuildFeatureV2,
@@ -7,7 +6,6 @@ import type {
   PluginManifestV2,
 } from "./manifest.js";
 import type {
-  BehaviorDefinition,
   GuildFeatureDefinition,
   PluginCapabilityDefinition,
   PluginCommandDefinition,
@@ -41,24 +39,6 @@ export function buildManifestV2(
         : {}),
       ...(cmd.requiredCapability
         ? { required_capability: cmd.requiredCapability }
-        : {}),
-    }),
-  );
-
-  const behaviors: ManifestBehavior[] = (cfg.behaviors ?? []).map(
-    (b: BehaviorDefinition): ManifestBehavior => ({
-      key: b.key,
-      name: b.key,
-      description: b.description,
-      webhook_path: b.webhookPath,
-      ...(b.slashHints
-        ? {
-            slashHints: {
-              suggested_name: b.slashHints.suggestedName,
-              suggested_description: b.slashHints.suggestedDescription,
-              options: b.slashHints.options,
-            },
-          }
         : {}),
     }),
   );
@@ -151,7 +131,6 @@ export function buildManifestV2(
       : {}),
     ...(cfg.configSchema ? { config_schema: cfg.configSchema } : {}),
     ...(guild_features.length > 0 ? { guild_features } : {}),
-    ...(behaviors.length > 0 ? { behaviors } : {}),
     ...(plugin_commands.length > 0 ? { plugin_commands } : {}),
     ...(capabilities.length > 0 ? { capabilities } : {}),
     endpoints: {

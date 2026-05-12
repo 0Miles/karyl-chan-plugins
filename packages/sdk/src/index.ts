@@ -2,7 +2,6 @@
 export {
   definePlugin,
   definePluginCommand,
-  defineBehavior,
   defineGuildFeature,
   definePluginCapability,
   definePluginComponent,
@@ -11,7 +10,6 @@ export {
 export type {
   PluginConfigV2,
   PluginCommandDefinition,
-  BehaviorDefinition,
   GuildFeatureDefinition,
   PluginCapabilityDefinition,
   PluginComponentDefinition,
@@ -22,7 +20,6 @@ export type {
 
 export type {
   PluginManifestV2,
-  ManifestBehavior,
   ManifestPluginCommand,
   ManifestCapability,
   ManifestGuildFeatureV2,
@@ -37,8 +34,6 @@ export type {
   InteractionContext,
   Logger,
   WebhookPayload,
-  BehaviorContext,
-  BehaviorReply,
   ComponentContext,
   ComponentReply,
 } from "./types.js";

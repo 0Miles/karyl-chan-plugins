@@ -3,7 +3,7 @@
 Shared SDK for [karyl-chan](https://github.com/0Miles/karyl-chan) plugins.
 Encapsulates the boilerplate every plugin needs:
 
-- Fastify server with HMAC-verified `/commands/:commandName` (and `…/autocomplete`) dispatch + behavior webhook routes
+- Fastify server with HMAC-verified `/commands/:commandName` (and `…/autocomplete`) dispatch + `/components` (button) dispatch
 - Plugin lifecycle client: register + heartbeat + auto re-register on 401
 - HMAC signing helpers (v0 + v1), byte-for-byte compatible with the bot's `karyl-chan/src/utils/hmac.ts`
 - Manifest builder from your `definePlugin` config
@@ -53,14 +53,15 @@ const started = await buildPlugin().start();
 // Or pass overrides: await buildPlugin().start({ port: 3000, botUrl: 'http://…' });
 ```
 
-`definePlugin` also takes `behaviors` (`defineBehavior`) and `capabilities`
-(`definePluginCapability`); an `onReady(server)` hook lets you register extra
-Fastify routes (e.g. a WebUI) before `listen()`.
+`definePlugin` also takes `guildFeatures` (`defineGuildFeature`), `components`
+(`definePluginComponent` — button handlers, dispatched on `/components`) and
+`capabilities` (`definePluginCapability`); an `onReady(server)` hook lets you
+register extra Fastify routes (e.g. a WebUI) before `listen()`.
 
 ## `start()` behaviour
 
 1. Builds a Fastify instance (`logger: true`)
-2. Mounts `GET /health`, the HMAC-verified `POST /commands/:name` (+ `…/autocomplete`) dispatch routes, and a route per declared behavior
+2. Mounts `GET /health`, the HMAC-verified `POST /commands/:name` (+ `…/autocomplete`) dispatch routes, and (if any components are declared) `POST /components`
 3. Runs your `onReady(server)` hook, then `listen()`s on `PORT`/`HOST`
 4. If `KARYL_PLUGIN_SETUP_SECRET` is set: builds the v2 manifest and starts the lifecycle client (register + heartbeat, exponential-backoff retry, auto re-register on 401)
 5. Registers `SIGTERM`/`SIGINT` for graceful shutdown
@@ -134,7 +135,7 @@ The bot re-sends the key on every heartbeat, so a key rotation propagates within
 ## Protocol alignment
 
 - HMAC: bot dual-signs **v0** (`v0:<ts>:<body>`) **and v1** (`v1:<METHOD>:<path>:<ts>:<body>`); the SDK verifies inbound dispatch with v1 when present (method+path bound), else v0. Replay window ±300 s.
-- Manifest `schema_version: '2'` — commands (three-axis: scope / integration types / contexts), behaviors, guild features, capabilities.
+- Manifest `schema_version: '2'` — commands (three-axis: scope / integration types / contexts), guild features, components, capabilities.
 - Dispatch: `POST /commands/{name}` (+ `/commands/{name}/autocomplete`); the plugin completes a deferred reply via `POST ${BOT_URL}/api/plugin/interactions.respond`.
 - The `defineCommand` / `PluginConfig` v1 names are deprecated stubs kept only so old v1 plugin builds still import; calling `defineCommand()` throws. Use `definePluginCommand` + `definePlugin`.
 

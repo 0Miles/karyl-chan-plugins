@@ -1,7 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import type {
-  BehaviorContext,
-  BehaviorReply,
   CommandContext,
   CommandOption,
   CommandReply,
@@ -144,24 +142,6 @@ export interface PluginCommandDefinition {
 }
 
 /**
- * 軌二：Behavior 定義（含 handler）。
- */
-export interface BehaviorDefinition {
-  /** 唯一識別鍵，對應 manifest behaviors[].key。 */
-  key: string;
-  /** 說明文字。 */
-  description: string;
-  /** 掛載於 plugin HTTP server 的路徑（對應 manifest behaviors[].webhook_path）。 */
-  webhookPath: string;
-  slashHints?: {
-    suggestedName?: string;
-    suggestedDescription?: string;
-    options?: CommandOption[];
-  };
-  handler: (ctx: BehaviorContext) => BehaviorReply | Promise<BehaviorReply>;
-}
-
-/**
  * Plugin 元件（按鈕）handler 定義。
  *
  * Plugin 在它送出的訊息上掛 Discord v1 按鈕，`custom_id` 形如
@@ -247,9 +227,6 @@ export interface PluginConfigV2 {
   /** 軌三：plugin 自訂指令（三軸寫死）。 */
   pluginCommands?: PluginCommandDefinition[];
 
-  /** 軌二：webhook 接口層條目。 */
-  behaviors?: BehaviorDefinition[];
-
   /** 軌一：guild feature 定義。 */
   guildFeatures?: GuildFeatureDefinition[];
 
@@ -303,14 +280,6 @@ export function definePluginCommand(
       `definePluginCommand: '${def.name}'.description must be a non-empty string`,
     );
   }
-  return def;
-}
-
-/**
- * 定義一個 behavior（軌二 webhook 接口層條目）。
- * 回傳定義物件不變（類型化建構子）。
- */
-export function defineBehavior(def: BehaviorDefinition): BehaviorDefinition {
   return def;
 }
 
@@ -400,7 +369,7 @@ export function definePluginCapability(
   return def;
 }
 
-/** 判斷 config 是否為 v2 格式（有 pluginCommands 或 behaviors 或兩者皆無 commands）。 */
+/** 判斷 config 是否為 v2 格式（v1 用 `commands`，v2 不用）。 */
 function isPluginConfigV2(
   config: PluginConfigV2 | PluginConfig,
 ): config is PluginConfigV2 {
@@ -489,7 +458,6 @@ export function definePlugin(
             ...(config.pluginCommands ?? []),
             ...(config.guildFeatures ?? []).flatMap((f) => f.commands ?? []),
           ],
-          behaviors: config.behaviors ?? [],
           components: config.components ?? [],
           getToken: () => client?.token() ?? null,
           getDispatchHmacKey: () => client?.getDispatchHmacKey() ?? null,

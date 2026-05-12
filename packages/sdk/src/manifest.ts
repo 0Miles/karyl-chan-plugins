@@ -163,52 +163,6 @@ export interface ManifestCommand {
 }
 
 /**
- * 軌二：Behaviors（webhook 接口層）。
- * 三軸（scope/integration_types/contexts）完全不在 manifest 寫，
- * 由 admin 在 UI 操作後儲存到 bot 的 behaviors 表。
- * Plugin 只宣告「我能接什麼 HTTP 請求」。
- */
-export interface ManifestBehavior {
-  /**
-   * 唯一識別鍵，在該 plugin 內不重複。
-   * 格式：[a-z0-9][a-z0-9-_]*
-   */
-  key: string;
-  /** 顯示名稱，展示於 admin UI behaviors 管理頁面。 */
-  name: string;
-  /** 描述，讓 admin 了解此 behavior 的功能。 */
-  description?: string;
-  /**
-   * Webhook 接收路徑（相對於 plugin.url）。
-   * 必須以 `/` 開頭，同 plugin 內必須唯一（bot 端 V-09 強制）。
-   * 例如 "/webhooks/notify"，最終 bot 呼叫 URL = `{plugin.url}{webhook_path}`。
-   *
-   * 裸 webhook 相容契約：
-   * - 若 slashHints 不存在，此路徑必須直接接受 Discord 原生 channel
-   *   webhook payload（RESTPostAPIWebhookWithTokenJSONBody）。
-   * - 若 slashHints 存在，bot 在 admin 設定 slash trigger 後
-   *   以 plugin RPC 形式 POST 到此路徑。
-   */
-  webhook_path: string;
-  /**
-   * 可選 slash trigger 元資訊。
-   * 存在時，admin 可把此 behavior 接成 slash command trigger。
-   * 不存在時，此 URL 是純 webhook 接口，可直接當 native Discord channel webhook 使用。
-   */
-  slashHints?: {
-    /** 建議的 slash command name（admin 可覆蓋）。 */
-    suggested_name?: string;
-    /** 指令說明文字（admin 可覆蓋）。 */
-    suggested_description?: string;
-    /** 指令 options 定義（admin 不可改結構）。 */
-    options?: ManifestCommandOption[];
-  };
-  config_schema?: ManifestConfigField[];
-  /** 是否支援 continuous session（沿用 v1 dm_behaviors 語意）。 */
-  supports_continuous?: boolean;
-}
-
-/**
  * 軌三：Plugin 自訂指令（plugin 鎖死三軸，admin 只能 on/off）。
  * scope / integration_types / contexts 三欄全為必填；
  * bot 端 validateManifest 拒絕任何違反三軸規則的 manifest。
@@ -274,9 +228,6 @@ export interface PluginManifestV2 {
   /** 軌一：Guild features（結構不動）。 */
   guild_features?: ManifestGuildFeatureV2[];
 
-  /** 軌二：Behaviors（webhook 接口層）。三軸由 admin 設定，manifest 不寫死。 */
-  behaviors?: ManifestBehavior[];
-
   /** 軌三：Plugin 自訂指令（三軸寫死於 manifest）。 */
   plugin_commands?: ManifestPluginCommand[];
 
@@ -296,7 +247,5 @@ export interface PluginManifestV2 {
     /** plugin 元件（按鈕）互動派送端點；只有宣告 components 時才出現，預設 `/components`。 */
     plugin_component?: string;
     guild_feature_action?: string;
-    // 注意：behaviors 不走 endpoints，每條 behavior 自帶 webhook_path
-    // 注意：v1 endpoints.dm_behavior_dispatch 在 v2 廢棄
   };
 }

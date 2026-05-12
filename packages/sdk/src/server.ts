@@ -12,13 +12,11 @@ import {
   verifyV1,
 } from "./hmac.js";
 import type {
-  BehaviorDefinition,
   CommandDefinition,
   PluginCommandDefinition,
   PluginComponentDefinition,
 } from "./plugin.js";
 import type {
-  BehaviorContext,
   CommandContext,
   CommandReply,
   ComponentContext,
@@ -34,10 +32,6 @@ export interface PluginServerOptions {
    * M1-E 升級後移除 commands 欄位。
    */
   pluginCommands?: PluginCommandDefinition[];
-  /**
-   * v2：behaviors（軌二 webhook 接口層）。
-   */
-  behaviors?: BehaviorDefinition[];
   /** v2：plugin 元件（按鈕）handler。掛在 `/components`。 */
   components?: PluginComponentDefinition[];
   /**
@@ -231,11 +225,6 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
         )
       : []),
   ]);
-
-  // v2 behavior map：key → handler
-  const behaviorMap = new Map<string, BehaviorDefinition["handler"]>(
-    (opts.behaviors ?? []).map((b) => [b.key, b.handler]),
-  );
 
   // v2 component map：componentId → handler
   const componentMap = new Map<string, PluginComponentDefinition["handler"]>(
@@ -484,81 +473,6 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
       }
     },
   );
-
-  // ── 軌二：behavior webhook dispatch（無 HMAC，裸 HTTP；可選 token 驗證）──
-  // Bot 呼叫時（source='plugin' behavior），可能帶 X-Plugin-Webhook-Token header。
-  // Plugin 端若需要驗身，在 handler 內自行呼叫 verifyWebhookToken()。
-  // SDK 不在路由層強制驗證，以保持「裸 webhook 相容」契約。
-  //
-  // 每個 behavior 掛載其宣告的 webhookPath 作為獨立路由（對齊 bot 端
-  // WebhookForwarder 以 manifest behaviors[].webhook_path 為完整路徑派送）。
-  for (const behavior of opts.behaviors ?? []) {
-    const behaviorKey = behavior.key;
-    const handler = behaviorMap.get(behaviorKey);
-    if (!handler) continue;
-
-    const wp = behavior.webhookPath;
-    if (wp === "/health" || wp.startsWith("/commands/") || wp === "/commands") {
-      throw new Error(
-        `behavior '${behaviorKey}' webhookPath '${wp}' conflicts with SDK reserved routes`,
-      );
-    }
-
-    server.post(
-      behavior.webhookPath,
-      async (request: FastifyRequest, reply: FastifyReply) => {
-        let body: unknown;
-        try {
-          body =
-            typeof request.body === "string"
-              ? JSON.parse(request.body)
-              : request.body;
-        } catch {
-          body = request.body;
-        }
-
-        // Strip Authorization header to avoid leaking bot tokens to handler.
-        const headers = Object.fromEntries(
-          Object.entries(
-            request.headers as Record<string, string | string[] | undefined>,
-          )
-            .filter(([k]) => k.toLowerCase() !== "authorization")
-            .map(([k, v]) => [k, Array.isArray(v) ? (v[0] ?? "") : (v ?? "")]),
-        );
-
-        const token = opts.getToken();
-        const ctx: BehaviorContext = {
-          pluginKey: opts.pluginKey,
-          behaviorKey,
-          body,
-          headers,
-          log: {
-            info: (msg, meta) => server.log.info(meta ?? {}, msg),
-            warn: (msg, meta) => server.log.warn(meta ?? {}, msg),
-            error: (msg, meta) => server.log.error(meta ?? {}, msg),
-          },
-          botRpc: (path: string, rpcBody?: unknown) => {
-            if (!token) return Promise.resolve(null);
-            return callBotRpc(server.log, opts.botUrl, token, path, rpcBody);
-          },
-        };
-
-        try {
-          const result = await handler(ctx);
-          if (result === null || result === undefined) {
-            return reply.code(204).send();
-          }
-          if (typeof result === "string") {
-            return reply.code(200).send({ content: result });
-          }
-          return reply.code(200).send(result);
-        } catch (err) {
-          server.log.error({ err, behaviorKey }, "behavior handler threw");
-          return reply.code(500).send({ error: "internal error" });
-        }
-      },
-    );
-  }
 
   return server;
 }

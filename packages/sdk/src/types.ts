@@ -117,10 +117,10 @@ export type InteractionContext = "Guild" | "BotDM" | "PrivateChannel";
 // ── v2 新增型別 ─────────────────────────────────────────────────────────────
 
 /**
- * Webhook 原始 payload，對應 Discord RESTPostAPIWebhookWithTokenJSONBody。
- * Plugin 可選擇只用其中欄位，或直接 pass-through 給 Discord。
- * 若 behaviors[].slashHints 不存在，webhook_path 必須接受此格式，
- * 以支援 Discord 原生 channel webhook 直接 POST（裸 webhook 相容契約）。
+ * Discord webhook POST body shape (`RESTPostAPIWebhookWithTokenJSONBody`).
+ * Handy when a plugin exposes its own HTTP route for an admin-configured
+ * `webhook`-source behavior to point at — the bot POSTs roughly this
+ * shape — and the plugin wants a typed view of the payload it parses.
  */
 export interface WebhookPayload {
   content?: string;
@@ -134,41 +134,6 @@ export interface WebhookPayload {
   tts?: boolean;
   flags?: number;
 }
-
-/**
- * Behavior handler 接收到的上下文（軌二）。
- * 比 CommandContext 輕量：不帶 Discord interaction 語意，只帶 HTTP 原語。
- */
-export interface BehaviorContext {
-  /** Plugin key（= manifest.plugin.id）。 */
-  pluginKey: string;
-  /** Behavior key（來自 manifest behaviors[].key）。 */
-  behaviorKey: string;
-  /**
-   * 原始請求 body。
-   * - 若由 bot slash trigger 呼叫：內容為 bot 合成的 slash interaction payload。
-   * - 若由外部 webhook 呼叫：內容為呼叫方 POST 的 body（plugin 自行解析）。
-   */
-  body: unknown;
-  /** HTTP headers（已移除 Authorization）。 */
-  headers: Record<string, string>;
-  /** Logger。 */
-  log: Logger;
-  /**
-   * Call a bot-side plugin RPC endpoint.
-   * Authorization header and base URL are filled in automatically.
-   * Returns the parsed JSON body on 2xx, an empty object on 204,
-   * or null on network / non-2xx errors (already logged).
-   */
-  botRpc(path: string, body?: unknown): Promise<unknown | null>;
-}
-
-/**
- * Behavior handler 回傳值（軌二）。
- * - 若要回應 webhook 呼叫方：回傳 WebhookPayload 或 string（= { content: string }）。
- * - 若不需回應（fire-and-forget）：回傳 null 或 undefined。
- */
-export type BehaviorReply = WebhookPayload | string | null | undefined;
 
 // ── Component（按鈕）互動 ────────────────────────────────────────────────────
 
