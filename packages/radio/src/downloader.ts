@@ -40,8 +40,19 @@ export async function ensureMusicDir(): Promise<void> {
   await mkdir(MUSIC_DIR, { recursive: true });
 }
 
+/** Characters that are illegal in file names on common filesystems. */
+const ILLEGAL_FILENAME_CHARS = new Set('<>:"/\\|?*');
+
 function sanitizeFilename(name: string): string {
-  return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 200);
+  // Replace the illegal characters above and any ASCII control character
+  // (0x00–0x1F) with "_", then cap the length. Done char-by-char rather
+  // than with a regex so there's no literal control character inside a
+  // pattern.
+  let out = "";
+  for (const ch of name) {
+    out += ILLEGAL_FILENAME_CHARS.has(ch) || ch.charCodeAt(0) < 0x20 ? "_" : ch;
+  }
+  return out.slice(0, 200);
 }
 
 export async function downloadAudio(
