@@ -35,6 +35,7 @@ import {
   doStop,
 } from "./playback-actions.js";
 import * as nowPlaying from "./now-playing.js";
+import { PLUGIN_KEY } from "./constants.js";
 import { isHttpUrl, isYouTubePlaylistUrl } from "./downloader.js";
 import { downloadAndStore } from "./library.js";
 import {
@@ -59,10 +60,6 @@ import {
  *  here; `processGuild` `.delete()`s when a guild's session goes idle. */
 export const seenGuilds = new Set<string>();
 
-/** Plugin key (= manifest plugin.id). Single source of truth — also the
- *  pluginKey half of the `plugin:<key>:webui.access` capability token. */
-const PLUGIN_KEY = "karyl-radio";
-
 /** Env-var fallback for the browser-reachable base URL. Only used when the
  *  bot hasn't yet returned a publicBaseUrl (pre-register or no WEB_BASE_URL). */
 const RADIO_PUBLIC_URL_ENV = process.env.RADIO_PUBLIC_URL
@@ -70,8 +67,11 @@ const RADIO_PUBLIC_URL_ENV = process.env.RADIO_PUBLIC_URL
   : undefined;
 
 // Propagate env fallback into web-routes.ts at module init time so
-// effectiveBase() can use it before any SDK wiring happens.
+// effectiveBase() can use it before any SDK wiring happens, and hand the
+// now-playing message manager the same base-URL getter (importing it there
+// directly would create a now-playing ↔ web-routes cycle).
 setPublicUrlEnvFallback(RADIO_PUBLIC_URL_ENV);
+nowPlaying.setEffectiveBaseGetter(effectiveBase);
 
 type BotRpcFn = (path: string, body?: unknown) => Promise<unknown | null>;
 
@@ -269,7 +269,27 @@ function controlHandler(
 
     let paused = status.paused === true;
     if (action === "next") {
-      await doNext(guildId, ctx.botRpc);
+      const r = await doNext(guildId, ctx.botRpc);
+      if (r.kind === "queue-empty") {
+        // Queue drained — playback stopped. Tear the panel down rather
+        // than leave a "nothing playing" card with live buttons. (Check
+        // whether this click was on that very message *before* teardown
+        // forgets it.)
+        const onPublicMessage =
+          nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
+        await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+        return onPublicMessage
+          ? undefined
+          : {
+              embeds: [
+                {
+                  color: EMBED_COLOR,
+                  description: "⏹ 佇列播完了，已停止播放。",
+                },
+              ],
+              components: [],
+            };
+      }
       paused = false; // a fresh voice.play isn't paused
     } else if (action === "prev") {
       await doPrev(guildId, ctx.botRpc);

@@ -21,15 +21,23 @@
  * own buttons edit.
  */
 import { createHash } from "node:crypto";
+import { PLUGIN_KEY } from "./constants.js";
 import type { BotRpc } from "./playback-actions.js";
 import { nowPlayingComponents, renderNowPlayingEmbed } from "./format.js";
-import { effectiveBase } from "./web-routes.js";
 
-/** Plugin key — also the pluginKey half of `kc:<key>:<action>` button ids. */
-const PLUGIN_KEY = "karyl-radio";
 /** WebUI-link session token lifetime + how early to re-mint it. */
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TOKEN_REFRESH_MARGIN_MS = 60 * 60 * 1000;
+
+// Browser-reachable base URL for the WebUI link button. Wired from
+// plugin.ts at module init (it imports `effectiveBase` from web-routes.ts)
+// — done this way rather than importing web-routes.ts here, which would
+// create a now-playing ↔ web-routes import cycle.
+let _effectiveBase: () => string = () => "http://localhost:903";
+/** Wire the browser-reachable base-URL getter (called once from plugin.ts). */
+export function setEffectiveBaseGetter(fn: () => string): void {
+  _effectiveBase = fn;
+}
 
 /** Voice-status fields `sync` needs (subset of the bot's voice.status). */
 export interface VoiceStatusLike {
@@ -93,7 +101,7 @@ function render(
       paused: !!status.paused,
     }),
   ];
-  const webuiUrl = token ? `${effectiveBase()}/?token=${token}` : null;
+  const webuiUrl = token ? `${_effectiveBase()}/?token=${token}` : null;
   const components = nowPlayingComponents(
     PLUGIN_KEY,
     guildId,
