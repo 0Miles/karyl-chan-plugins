@@ -84,16 +84,17 @@ function autoplaySeedVideoId(s: GuildState): string | null {
 /**
  * Autoplay: when a guild has `autoplay` on, isn't looping, and the queue
  * is empty, fetch the YouTube "mix" radio seeded from the most recent
- * YouTube track and append the first recommendation we haven't already
- * played / queued this session. Runs *before* the advance step (so a
- * just-ended track is replaced with no gap) and also proactively while a
- * track is still playing (so the next one is queued ahead of time).
+ * YouTube track and append up to `autoplayFetchCount` recommendations we
+ * haven't already played / queued this session. Refilling only when the
+ * queue is *empty* (rather than topping it up) keeps the (slow) yt-dlp
+ * mix fetch to roughly one per `autoplayFetchCount` songs. Runs *before*
+ * the advance step (so a just-ended track is replaced with no gap).
  *
- * `autoplaySeededFrom` is set to the seed id *before* the (slow) yt-dlp
- * call so a still-running fetch — or a seed that yields nothing fresh —
- * doesn't re-trigger every 5 s tick; the next refill only fires once a
- * *different* track becomes the seed. Errors are swallowed (a yt-dlp
- * hiccup must not break the advance loop).
+ * `autoplaySeededFrom` is set to the seed id *before* the fetch so a
+ * still-running fetch — or a seed that yields nothing fresh — doesn't
+ * re-trigger every tick; the next refill only fires once a *different*
+ * track becomes the seed. Errors are swallowed (a yt-dlp hiccup must not
+ * break the advance loop).
  */
 async function maybeAutoplayRefill(
   guildId: string,
@@ -117,7 +118,8 @@ async function maybeAutoplayRefill(
     return;
   }
 
-  // Skip the seed itself and anything already played / queued this session.
+  // Skip the seed itself and anything already played / queued this
+  // session — and don't repeat a video within the same batch.
   const seen = new Set<string>([seedId]);
   if (s.current) {
     const id = youtubeVideoIdOf(s.current);
@@ -131,20 +133,21 @@ async function maybeAutoplayRefill(
     const id = youtubeVideoIdOf(q);
     if (id) seen.add(id);
   }
-  const pick = recs.find((t) => {
+  const want = s.autoplayFetchCount;
+  let queued = 0;
+  for (const t of recs) {
+    if (queued >= want) break;
     const id = youtubeVideoIdOf(t);
-    return id !== null && !seen.has(id);
-  });
-  if (!pick) {
+    if (id === null || seen.has(id)) continue;
+    seen.add(id);
+    enqueue(guildId, t);
+    queued++;
+  }
+  if (queued === 0) {
     log.info("autoplay: mix had nothing fresh", { guildId, seedId });
     return;
   }
-  enqueue(guildId, pick);
-  log.info("autoplay: queued recommendation", {
-    guildId,
-    seedId,
-    label: pick.label,
-  });
+  log.info("autoplay: queued recommendations", { guildId, seedId, count: queued });
 }
 
 async function processGuild(

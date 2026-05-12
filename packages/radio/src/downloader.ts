@@ -174,17 +174,19 @@ export const PLAYLIST_MAX_ENTRIES = 100;
 
 /**
  * Expand a YouTube playlist URL into its entries (flat — fast, no
- * per-video extraction). Capped at PLAYLIST_MAX_ENTRIES. Throws if
- * yt-dlp fails; returns [] if the playlist is empty / unavailable.
+ * per-video extraction). Capped at `maxEntries` (default
+ * PLAYLIST_MAX_ENTRIES). Throws if yt-dlp fails; returns [] if the
+ * playlist is empty / unavailable.
  */
 export async function resolvePlaylistEntries(
   playlistUrl: string,
+  maxEntries: number = PLAYLIST_MAX_ENTRIES,
 ): Promise<PlaylistEntry[]> {
   const out = await runYtDlp([
     "--flat-playlist",
     "--no-warnings",
     "--playlist-end",
-    String(PLAYLIST_MAX_ENTRIES),
+    String(Math.max(1, Math.floor(maxEntries))),
     "--print",
     "%(url)s",
     "--print",
@@ -212,8 +214,10 @@ export async function resolvePlaylistEntries(
   return entries;
 }
 
-/** Max entries pulled from a YouTube auto-mix when seeding autoplay. */
-export const MIX_FETCH_MAX = 25;
+/** How many entries we pull from a YouTube auto-mix when seeding
+ *  autoplay — enough headroom to still hand back a full batch after
+ *  de-duping recently played tracks. */
+export const MIX_FETCH_MAX = 50;
 
 /**
  * Pull the auto-generated YouTube "Mix" radio for `videoId`
@@ -228,6 +232,7 @@ export async function resolveMixRecommendations(
   if (!/^[\w-]{11}$/.test(videoId)) return [];
   return resolvePlaylistEntries(
     `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`,
+    MIX_FETCH_MAX,
   );
 }
 

@@ -107,7 +107,20 @@ export interface GuildState {
    * autoplay is turned off.
    */
   autoplaySeededFrom: string | null;
+  /**
+   * How many recommendations the autoplay refill enqueues at once when
+   * the queue runs dry. Higher = fewer (rarer) yt-dlp "mix" fetches and
+   * a longer look-ahead; lower = recommendations track the current song
+   * more closely. Live-tunable per session via `/radio autoplay-count`.
+   */
+  autoplayFetchCount: number;
 }
+
+/** Default for `GuildState.autoplayFetchCount` — recs queued per refill. */
+export const DEFAULT_AUTOPLAY_FETCH_COUNT = 7;
+/** Hard cap for `/radio autoplay-count` (a YouTube mix realistically
+ *  yields ~25–50 entries, fewer after de-duping recently played ones). */
+export const MAX_AUTOPLAY_FETCH_COUNT = 25;
 
 /** How many played tracks to remember for the "previous" button. */
 const HISTORY_MAX = 50;
@@ -129,6 +142,7 @@ function ensure(guildId: string): GuildState {
       loop: "off",
       autoplay: false,
       autoplaySeededFrom: null,
+      autoplayFetchCount: DEFAULT_AUTOPLAY_FETCH_COUNT,
     };
     states.set(guildId, s);
   }
@@ -194,6 +208,20 @@ export function setAutoplay(guildId: string, on: boolean): void {
   const s = ensure(guildId);
   s.autoplay = on;
   if (!on) s.autoplaySeededFrom = null;
+}
+
+/**
+ * Set how many recommendations the autoplay refill enqueues at once.
+ * Clamped to [1, MAX_AUTOPLAY_FETCH_COUNT]; returns the value actually
+ * stored. Takes effect at the next refill (already-queued recs stay).
+ */
+export function setAutoplayFetchCount(guildId: string, n: number): number {
+  const clamped = Math.max(
+    1,
+    Math.min(MAX_AUTOPLAY_FETCH_COUNT, Math.floor(n)),
+  );
+  ensure(guildId).autoplayFetchCount = clamped;
+  return clamped;
 }
 
 export function hasPrevious(guildId: string): boolean {
