@@ -96,7 +96,8 @@ export function formatQueueList(guildId: string): string {
     }
   }
   lines.push(`Loop: \`${s.loop}\``);
-  if (s.autoplay) lines.push("Autoplay: `on`");
+  if (s.autoplay)
+    lines.push(`Autoplay: \`on\` (fetches ${s.autoplayFetchCount} at a time)`);
   return lines.join("\n");
 }
 
@@ -137,7 +138,7 @@ export function renderNowPlayingEmbed(
       : `_queue: ${queueSize} track${queueSize > 1 ? "s" : ""}_`,
   );
   lines.push(`${loopBadge(loop)} loop \`${loop}\``);
-  if (s?.autoplay) lines.push("♾️ autoplay on");
+  if (s?.autoplay) lines.push(`♾️ autoplay on (×${s.autoplayFetchCount})`);
 
   return {
     title: paused ? "⏸️ Paused" : "🎶 Now playing",

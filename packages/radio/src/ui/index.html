@@ -257,7 +257,7 @@
     function fmtSize(b) { if (!b) return ""; return b < 1048576 ? (b / 1024).toFixed(0) + " KB" : (b / 1048576).toFixed(1) + " MB"; }
     function loopBadge(m) { return m === "track" ? "🔂 repeat track" : m === "queue" ? "🔁 loop queue" : "▶️ no loop"; }
     function nextLoop(m) { return m === "off" ? "track" : m === "track" ? "queue" : "off"; }
-    function autoplayBadge(on) { return on ? "♾️ autoplay on" : "♾️ autoplay off"; }
+    function autoplayBadge(on, n) { return on ? "♾️ autoplay on (×" + (n || 7) + ")" : "♾️ autoplay off"; }
 
     // ── access denied ────────────────────────────────────────────────────
     function renderDenied(msg) {
@@ -339,7 +339,7 @@
           '<div class="title">' + (cur ? nameHtml(cur.label, cur.sourceUrl) : '<span style="color:var(--text-dim)">Nothing playing</span>') + '</div>' +
           '<div class="sub">' + (cur && (cur.queuedByName || cur.queuedBy) ? "queued by " + esc(cur.queuedByName || cur.queuedBy) + " · " : "") + esc(where) + '</div>' +
           '<span class="badge">' + loopBadge(snap.loop) + '</span>' +
-          (snap.autoplay ? '<span class="badge" style="margin-left:6px">♾️ autoplay</span>' : '') +
+          (snap.autoplay ? '<span class="badge" style="margin-left:6px">♾️ autoplay ·' + (snap.autoplayFetchCount || 7) + '</span>' : '') +
           '</div>';
         ctrlEl.innerHTML = "";
         const bPrev = el('<button class="ghost icon" title="Previous">⏮</button>');
@@ -349,7 +349,7 @@
         bNext.onclick = () => act("POST", "/api/session/" + encodeURIComponent(guildId) + "/next");
         const bLoop = el('<button class="ghost sm">' + loopBadge(snap.loop) + "</button>");
         bLoop.onclick = () => act("POST", "/api/session/" + encodeURIComponent(guildId) + "/loop", { mode: nextLoop(snap.loop) });
-        const bAuto = el('<button class="ghost sm">' + autoplayBadge(snap.autoplay) + "</button>");
+        const bAuto = el('<button class="ghost sm">' + autoplayBadge(snap.autoplay, snap.autoplayFetchCount) + "</button>");
         bAuto.onclick = () => act("POST", "/api/session/" + encodeURIComponent(guildId) + "/autoplay", { on: !snap.autoplay });
         ctrlEl.append(bPrev, bNext, bLoop, bAuto);
 

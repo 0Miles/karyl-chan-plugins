@@ -12,11 +12,14 @@ import {
 import {
   type LoopMode,
   type Track,
+  DEFAULT_AUTOPLAY_FETCH_COUNT,
+  MAX_AUTOPLAY_FETCH_COUNT,
   advance,
   enqueue,
   getState,
   requeueFront,
   setAutoplay,
+  setAutoplayFetchCount,
   setCurrent,
   setLoop,
 } from "./queue.js";
@@ -320,7 +323,7 @@ export default function buildPlugin() {
   return definePlugin({
     key: PLUGIN_KEY,
     name: "Karyl Radio",
-    version: "0.7.0",
+    version: "0.7.1",
     description:
       "Internet radio + YouTube audio library with WebUI management & playback control.",
     rpcMethodsUsed: [
@@ -470,6 +473,21 @@ export default function buildPlugin() {
                       },
                       { name: "off — stop when the queue ends", value: "off" },
                     ],
+                  },
+                ],
+              },
+              {
+                type: "sub_command",
+                name: "autoplay-count",
+                description:
+                  "How many YouTube recommendations autoplay queues per refill (1–25)",
+                options: [
+                  {
+                    type: "integer",
+                    name: "count",
+                    description:
+                      "Recommendations per refill (1–25) — omit to show the current value",
+                    required: false,
                   },
                 ],
               },
@@ -644,12 +662,40 @@ export default function buildPlugin() {
                     return "⚠ mode must be `on` or `off`.";
                   }
                   setAutoplay(guildId, mode === "on");
+                  const apCount =
+                    getState(guildId)?.autoplayFetchCount ??
+                    DEFAULT_AUTOPLAY_FETCH_COUNT;
                   await syncNowPlaying(guildId, ctx.botRpc);
                   return playbackReply(ctx, guildId, {
                     description:
                       mode === "on"
-                        ? "♾️ Autoplay **on** — when the queue runs out I'll keep playing YouTube recommendations seeded from the last YouTube track."
+                        ? `♾️ Autoplay **on** — when the queue runs out I'll queue **${apCount}** YouTube recommendation${apCount === 1 ? "" : "s"} (change with \`/radio autoplay-count\`) seeded from the last YouTube track.`
                         : "Autoplay **off** — playback stops when the queue ends.",
+                  });
+                }
+
+                case "autoplay-count": {
+                  const cur =
+                    getState(guildId)?.autoplayFetchCount ??
+                    DEFAULT_AUTOPLAY_FETCH_COUNT;
+                  const raw = ctx.options.count;
+                  if (raw === undefined || raw === null) {
+                    return playbackReply(ctx, guildId, {
+                      description: `♾️ Autoplay queues **${cur}** recommendation${cur === 1 ? "" : "s"} per refill. Pass \`count:\` (1–${MAX_AUTOPLAY_FETCH_COUNT}) to change it.`,
+                    });
+                  }
+                  const n = Number(raw);
+                  if (!Number.isFinite(n)) {
+                    return "⚠ count must be a whole number.";
+                  }
+                  const set = setAutoplayFetchCount(guildId, n);
+                  await syncNowPlaying(guildId, ctx.botRpc);
+                  const clampedNote =
+                    set !== Math.floor(n)
+                      ? ` (clamped to the 1–${MAX_AUTOPLAY_FETCH_COUNT} range)`
+                      : "";
+                  return playbackReply(ctx, guildId, {
+                    description: `♾️ Autoplay will now queue **${set}** recommendation${set === 1 ? "" : "s"} per refill${clampedNote}. Takes effect at the next refill; tracks already queued stay.`,
                   });
                 }
 

@@ -31,6 +31,7 @@ import {
 import {
   type LoopMode,
   type Track,
+  DEFAULT_AUTOPLAY_FETCH_COUNT,
   clearQueue,
   dequeueAt,
   enqueue,
@@ -148,6 +149,7 @@ async function sessionSnapshot(
     channelId,
     loop: s?.loop ?? "off",
     autoplay: s?.autoplay ?? false,
+    autoplayFetchCount: s?.autoplayFetchCount ?? DEFAULT_AUTOPLAY_FETCH_COUNT,
     current: s?.current ? publicTrack(s.current) : null,
     queue: (s?.queue ?? []).map(publicTrack),
     queueLength: s?.queue.length ?? 0,

@@ -16,6 +16,7 @@ and the advance loop, so it keeps its own package and docker service.
 | `skip` / `back` | Skip to next / go back to the previous track |
 | `loop <off\|track\|queue>` | Set the loop mode |
 | `autoplay <on\|off>` | Auto-queue YouTube recommendations when the queue runs out (see below) |
+| `autoplay-count <count>` | How many recommendations autoplay queues per refill (1–25; live, per session) |
 | `stop` | Stop, clear the queue, leave voice |
 | `np` / `queuelist` | Now-playing card (the embed + control buttons below; ephemeral, not auto-updated) / show the queue |
 | `stations` | List the built-in radio stations |
@@ -38,12 +39,16 @@ it off.
 
 With autoplay on, the advance loop keeps the queue topped up: whenever the
 queue is empty (and loop is `off`) it pulls the YouTube "Mix" radio seeded
-from the most recent YouTube track this session and appends the first
-recommendation not already played/queued. It refills proactively while a
-track is still playing, so the next song is lined up before the current
-one ends; if it's seeded from a non-YouTube track it falls back to the
-last YouTube track in the session play-log. It gives up gracefully (the
-session ends as usual) if the mix has nothing fresh. Off by default;
+from the most recent YouTube track this session and appends up to **N**
+recommendations not already played/queued — N defaults to **7** and is
+per-session, live-tunable with `/radio autoplay-count <n>` (range 1–25).
+Refilling only when the queue is empty (including while the current track
+is still playing, so the next song is lined up before this one ends) keeps
+the yt-dlp mix fetch to roughly one per N songs; a smaller N tracks the
+current song more closely, a larger N means fewer fetches and a longer
+look-ahead. If it's seeded from a non-YouTube track it falls back to the
+last YouTube track in the session play-log, and it gives up gracefully
+(the session ends as usual) if the mix has nothing fresh. Off by default;
 toggle it with `/radio autoplay`, the ♾️ button on the now-playing
 message, or the session WebUI.
 
