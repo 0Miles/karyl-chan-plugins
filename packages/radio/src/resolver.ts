@@ -79,14 +79,15 @@ export function libraryTrackToTrack(
     filename: string;
     title: string;
     coverUrl?: string;
-    /** The URL it was downloaded from — kept as `originUrl` when it's a
-     *  YouTube link so autoplay can seed recommendations from it. */
+    /** The URL it was downloaded from — kept as `originUrl` (YouTube
+     *  autoplay seeds recommendations from it; the WebUI links the track
+     *  title to it). */
     sourceUrl?: string;
   },
   userId: string | null,
 ): Track {
   const originUrl =
-    t.sourceUrl && isYouTubeUrl(t.sourceUrl) ? t.sourceUrl : undefined;
+    t.sourceUrl && isHttpUrl(t.sourceUrl) ? t.sourceUrl : undefined;
   return {
     url: `${PLUGIN_URL}/internal/audio/${encodeURIComponent(t.filename)}`,
     label: t.title,

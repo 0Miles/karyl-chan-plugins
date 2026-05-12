@@ -114,12 +114,20 @@ const LOOP_MODES: LoopMode[] = ["off", "track", "queue"];
 
 /** WebUI-facing shape of a track (no internal URLs leaked). */
 function publicTrack(t: Track): Record<string, unknown> {
+  // The track's user-facing "source": a YouTube/SoundCloud/… page URL it
+  // was resolved or downloaded from (kept on the Track as `originUrl`),
+  // else a direct http(s) media / station URL — but never the internal
+  // `/internal/audio/…` path a downloaded library file is streamed from.
+  const sourceUrl =
+    t.originUrl ??
+    (!t.trackId && /^https?:\/\//i.test(t.url) ? t.url : undefined);
   return {
     label: t.label,
     queuedBy: t.queuedBy,
     ...(t.queuedByName ? { queuedByName: t.queuedByName } : {}),
     ...(t.trackId ? { trackId: t.trackId } : {}),
     ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
   };
 }
 
