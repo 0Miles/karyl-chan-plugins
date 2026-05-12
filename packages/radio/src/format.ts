@@ -154,7 +154,8 @@ export function renderNowPlayingEmbed(
  * The control buttons carry `kc:<pluginKey>:<action>` custom ids (built
  * via the SDK's componentCustomId) and stay live for as long as the
  * message exists. `prev` is disabled with no play history; the loop and
- * autoplay buttons go blurple (style 1) while active; stop is red (style 4).
+ * autoplay buttons go blurple (style 1) while active; everything else is
+ * the plain secondary style.
  */
 export function nowPlayingComponents(
   pluginKey: string,
@@ -184,7 +185,7 @@ export function nowPlayingComponents(
         btn("prev", "⏮️", { disabled: !hasPrev }),
         btn("pause", status.paused ? "▶️" : "⏸️"),
         btn("next", "⏭️"),
-        btn("stop", "⏹️", { style: 4 }),
+        btn("stop", "⏹️"),
         btn("loop", "🔁", { style: loop === "off" ? 2 : 1 }),
       ],
     },
