@@ -39,6 +39,15 @@ export interface StartedPlugin {
    * `onReady`).
    */
   getSessionVerifyPublicKey(): string | null;
+  /**
+   * Browser-reachable base URL the bot exposes for this plugin's HTTP
+   * surface (i.e. `<bot>/plugin/<key>`). Undefined until the first
+   * successful register and only when the bot has `WEB_BASE_URL`
+   * configured. Supersedes a manually-set public-URL env on the plugin
+   * side — prefer this over a hard-coded env when the plugin is accessed
+   * through the bot proxy.
+   */
+  getPublicBaseUrl(): string | undefined;
 }
 
 /** Options passed to plugin.start() — all optional; fall back to env vars. */
@@ -405,6 +414,7 @@ export function definePlugin(
           behaviors: config.behaviors ?? [],
           getToken: () => client?.token() ?? null,
           getDispatchHmacKey: () => client?.getDispatchHmacKey() ?? null,
+          getPublicBaseUrl: () => client?.getPublicBaseUrl(),
         });
 
         await config.onReady?.(server);
@@ -461,6 +471,9 @@ export function definePlugin(
           getSessionVerifyPublicKey() {
             return client?.getSessionVerifyPublicKey() ?? null;
           },
+          getPublicBaseUrl() {
+            return client?.getPublicBaseUrl();
+          },
         };
 
         for (const sig of ["SIGTERM", "SIGINT"] as const) {
@@ -480,6 +493,7 @@ export function definePlugin(
           commands: v1Config.commands,
           getToken: () => client?.token() ?? null,
           getDispatchHmacKey: () => client?.getDispatchHmacKey() ?? null,
+          getPublicBaseUrl: () => client?.getPublicBaseUrl(),
         });
 
         await v1Config.onReady?.(server);
@@ -552,6 +566,9 @@ export function definePlugin(
           },
           getSessionVerifyPublicKey() {
             return client?.getSessionVerifyPublicKey() ?? null;
+          },
+          getPublicBaseUrl() {
+            return client?.getPublicBaseUrl();
           },
         };
 

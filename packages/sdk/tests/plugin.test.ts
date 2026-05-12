@@ -5,15 +5,19 @@
  *   - definePlugin: command names unique across pluginCommands AND
  *     every guildFeatures[].commands[] (they share one /commands/:name
  *     dispatch map)
+ *
+ * Also covers PluginClient.getPublicBaseUrl() — parsing from register
+ * and heartbeat responses.
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import {
   definePlugin,
   definePluginCommand,
   defineGuildFeature,
 } from "../src/plugin.js";
+import { startPluginClient } from "../src/client.js";
 
 const okCmd = (name: string) =>
   definePluginCommand({
@@ -124,5 +128,177 @@ describe("definePlugin command-name uniqueness", () => {
         }),
       /duplicate command name "clash"/,
     );
+  });
+});
+
+// ── PluginClient.getPublicBaseUrl() ──────────────────────────────────────────
+
+describe("PluginClient.getPublicBaseUrl()", () => {
+  // We intercept fetch to return controlled responses.
+  const originalFetch = globalThis.fetch;
+
+  type FetchFn = typeof fetch;
+  let fetchImpl: FetchFn;
+
+  before(() => {
+    // Replace global fetch with a proxy that delegates to fetchImpl.
+    (globalThis as unknown as Record<string, unknown>)["fetch"] = (
+      ...args: Parameters<FetchFn>
+    ) => fetchImpl(...args);
+  });
+
+  after(() => {
+    (globalThis as unknown as Record<string, unknown>)["fetch"] = originalFetch;
+  });
+
+  function makeRegisterRes(body: Record<string, unknown>): Response {
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function makeHeartbeatRes(body: Record<string, unknown>): Response {
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("returns the publicBaseUrl from the register response", async () => {
+    const registerBody = {
+      token: "tok-abc",
+      dispatchHmacKey: "key-abc",
+      sessionVerifyPublicKey: "spki-abc",
+      publicBaseUrl: "http://localhost:902/plugin/test-plugin",
+      heartbeat: { interval_seconds: 999 },
+    };
+    let callCount = 0;
+    fetchImpl = async () => {
+      callCount++;
+      return makeRegisterRes(registerBody);
+    };
+
+    const client = startPluginClient({
+      botUrl: "http://bot",
+      setupSecret: "secret",
+      manifest: {
+        schema_version: "2",
+        plugin: { id: "test-plugin", name: "Test", version: "0.1.0", url: "http://test-plugin:3000" },
+      },
+    });
+
+    // Wait for the async register to complete.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(
+      client.getPublicBaseUrl(),
+      "http://localhost:902/plugin/test-plugin",
+    );
+    client.stop();
+  });
+
+  it("returns undefined when publicBaseUrl is absent from the register response", async () => {
+    const registerBody = {
+      token: "tok-xyz",
+      dispatchHmacKey: "key-xyz",
+      sessionVerifyPublicKey: "spki-xyz",
+      // no publicBaseUrl field
+      heartbeat: { interval_seconds: 999 },
+    };
+    fetchImpl = async () => makeRegisterRes(registerBody);
+
+    const client = startPluginClient({
+      botUrl: "http://bot",
+      setupSecret: "secret",
+      manifest: {
+        schema_version: "2",
+        plugin: { id: "test-plugin", name: "Test", version: "0.1.0", url: "http://test-plugin:3000" },
+      },
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(client.getPublicBaseUrl(), undefined);
+    client.stop();
+  });
+
+  it("updates publicBaseUrl from a heartbeat response", async () => {
+    let callCount = 0;
+    fetchImpl = async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/heartbeat")) {
+        callCount++;
+        return makeHeartbeatRes({
+          sessionVerifyPublicKey: "spki-hb",
+          publicBaseUrl: "http://localhost:902/plugin/test-plugin-hb",
+        });
+      }
+      // register
+      return makeRegisterRes({
+        token: "tok-hb",
+        dispatchHmacKey: "key-hb",
+        sessionVerifyPublicKey: "spki-hb",
+        // publicBaseUrl absent on register
+        heartbeat: { interval_seconds: 0.1 }, // 100 ms heartbeat for the test
+      });
+    };
+
+    const client = startPluginClient({
+      botUrl: "http://bot",
+      setupSecret: "secret",
+      // No heartbeatIntervalMs override — let the server-returned 100 ms drive it.
+      manifest: {
+        schema_version: "2",
+        plugin: { id: "test-plugin", name: "Test", version: "0.1.0", url: "http://test-plugin:3000" },
+      },
+    });
+
+    // Wait for register (fast) + at least one heartbeat (100 ms cadence from server).
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(
+      client.getPublicBaseUrl(),
+      "http://localhost:902/plugin/test-plugin-hb",
+    );
+    assert.ok(callCount >= 1, "heartbeat should have been called at least once");
+    client.stop();
+  });
+
+  it("clears publicBaseUrl when a heartbeat omits it", async () => {
+    let beats = 0;
+    fetchImpl = async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/heartbeat")) {
+        beats++;
+        // Heartbeat no longer carries publicBaseUrl (e.g. WEB_BASE_URL was
+        // unset on the bot) — the client must clear it.
+        return makeHeartbeatRes({ sessionVerifyPublicKey: "spki-clr" });
+      }
+      // register: publicBaseUrl IS present
+      return makeRegisterRes({
+        token: "tok-clr",
+        dispatchHmacKey: "key-clr",
+        sessionVerifyPublicKey: "spki-clr",
+        publicBaseUrl: "http://localhost:902/plugin/test-plugin",
+        heartbeat: { interval_seconds: 0.1 }, // 100 ms heartbeat for the test
+      });
+    };
+
+    const client = startPluginClient({
+      botUrl: "http://bot",
+      setupSecret: "secret",
+      manifest: {
+        schema_version: "2",
+        plugin: { id: "test-plugin", name: "Test", version: "0.1.0", url: "http://test-plugin:3000" },
+      },
+    });
+
+    // After register: present. After at least one heartbeat: cleared.
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(client.getPublicBaseUrl(), undefined);
+    assert.ok(beats >= 1, "heartbeat should have been called at least once");
+    client.stop();
   });
 });

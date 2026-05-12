@@ -64,7 +64,7 @@ Fastify routes (e.g. a WebUI) before `listen()`.
 3. Runs your `onReady(server)` hook, then `listen()`s on `PORT`/`HOST`
 4. If `KARYL_PLUGIN_SETUP_SECRET` is set: builds the v2 manifest and starts the lifecycle client (register + heartbeat, exponential-backoff retry, auto re-register on 401)
 5. Registers `SIGTERM`/`SIGINT` for graceful shutdown
-6. Returns a `StartedPlugin` — `{ server, address(), stop(), botRpc(path, body), getSessionVerifyPublicKey() }` (the latter two are only meaningful after the first successful register)
+6. Returns a `StartedPlugin` — `{ server, address(), stop(), botRpc(path, body), getSessionVerifyPublicKey(), getPublicBaseUrl() }` (the latter three are only meaningful after the first successful register)
 
 ## Environment variables
 
@@ -93,6 +93,23 @@ interface CommandContext {
 
 A handler returns a `CommandReply`: a plain string (= `{ content }`) or
 `{ content?, embeds?, components?, ephemeral? }`.
+
+## `publicBaseUrl` — bot-proxied WebUI base
+
+When the bot is configured with a `WEB_BASE_URL`, it exposes every registered
+plugin's HTTP surface at `<WEB_BASE_URL>/plugin/<pluginKey>/` and includes a
+`publicBaseUrl` field (e.g. `http://localhost:902/plugin/karyl-radio`) in its
+register and heartbeat responses. The SDK stores it and surfaces it in two places:
+
+- **`StartedPlugin.getPublicBaseUrl(): string | undefined`** — wire it into your
+  WebUI layer after `start()` resolves (like `getSessionVerifyPublicKey()`).
+- **`CommandContext.publicBaseUrl?: string`** — available inside every command
+  handler; use it to build browser-facing links (e.g. the `/radio manage` button).
+
+The value is `undefined` until at least one successful register _and_ only when
+the bot has `WEB_BASE_URL` set; handle the fallback case with a plugin-side env
+var or a hardcoded default. `publicBaseUrl` supersedes a manually-set public-URL
+env var when the plugin is accessed via the bot proxy.
 
 ## WebUI plugins
 

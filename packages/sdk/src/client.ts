@@ -39,6 +39,12 @@ export interface PluginClient {
    * too old to send it.
    */
   getSessionVerifyPublicKey(): string | null;
+  /**
+   * Browser-reachable base URL the bot exposes for this plugin's HTTP
+   * surface (i.e. `<bot>/plugin/<key>`). Undefined until first register
+   * or when the bot has no `WEB_BASE_URL` configured.
+   */
+  getPublicBaseUrl(): string | undefined;
 }
 
 const REGISTER_BACKOFF_BASE_MS = 2_000;
@@ -50,6 +56,7 @@ export function startPluginClient(opts: PluginClientOptions): PluginClient {
   let token: string | null = null;
   let dispatchHmacKey: string | null = null;
   let sessionVerifyPublicKey: string | null = null;
+  let publicBaseUrl: string | undefined = undefined;
   let heartbeatTimer: NodeJS.Timeout | null = null;
   let stopped = false;
   let registerAttempt = 0;
@@ -77,6 +84,7 @@ export function startPluginClient(opts: PluginClientOptions): PluginClient {
         token?: string;
         dispatchHmacKey?: string;
         sessionVerifyPublicKey?: string;
+        publicBaseUrl?: string;
         heartbeat?: { path?: string; interval_seconds?: number };
       };
       if (typeof data.token !== "string" || data.token.length === 0) {
@@ -95,6 +103,11 @@ export function startPluginClient(opts: PluginClientOptions): PluginClient {
         data.sessionVerifyPublicKey.length > 0
       ) {
         sessionVerifyPublicKey = data.sessionVerifyPublicKey;
+      }
+      if (typeof data.publicBaseUrl === "string" && data.publicBaseUrl.length > 0) {
+        publicBaseUrl = data.publicBaseUrl;
+      } else {
+        publicBaseUrl = undefined;
       }
       const intervalSec =
         opts.heartbeatIntervalMs != null
@@ -155,11 +168,12 @@ export function startPluginClient(opts: PluginClientOptions): PluginClient {
         log.warn(`heartbeat HTTP ${res.status}`);
         return;
       }
-      // The bot echoes its current JWT verify public key on every beat;
-      // pick up a rotated key here (within one heartbeat interval) without
-      // waiting for a re-register.
+      // The bot echoes its current JWT verify public key and publicBaseUrl
+      // on every beat; pick up rotated values here without waiting for a
+      // re-register.
       const data = (await res.json().catch(() => null)) as {
         sessionVerifyPublicKey?: unknown;
+        publicBaseUrl?: unknown;
       } | null;
       if (
         data &&
@@ -169,6 +183,16 @@ export function startPluginClient(opts: PluginClientOptions): PluginClient {
       ) {
         sessionVerifyPublicKey = data.sessionVerifyPublicKey;
         log.info("session verify key updated from heartbeat");
+      }
+      if (data) {
+        const hbUrl =
+          typeof data.publicBaseUrl === "string" && data.publicBaseUrl.length > 0
+            ? data.publicBaseUrl
+            : undefined;
+        if (hbUrl !== publicBaseUrl) {
+          publicBaseUrl = hbUrl;
+          log.info("publicBaseUrl updated from heartbeat");
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -197,6 +221,7 @@ export function startPluginClient(opts: PluginClientOptions): PluginClient {
     token: () => token,
     getDispatchHmacKey: () => dispatchHmacKey,
     getSessionVerifyPublicKey: () => sessionVerifyPublicKey,
+    getPublicBaseUrl: () => publicBaseUrl,
   };
 }
 

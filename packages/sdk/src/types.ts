@@ -42,6 +42,13 @@ export interface CommandContext {
   /** Logger from the underlying Fastify instance */
   log: Logger;
   /**
+   * Browser-reachable base URL the bot exposes for this plugin's HTTP
+   * surface, i.e. `<bot>/plugin/<key>`. Only set after at least one
+   * successful register and only when the bot has `WEB_BASE_URL`
+   * configured; otherwise undefined.
+   */
+  publicBaseUrl?: string;
+  /**
    * Call a bot-side plugin RPC endpoint (e.g. `/api/plugin/voice.play`).
    * Authorization header and base URL are filled in automatically.
    * Returns the parsed JSON body on 2xx, an empty object on 204,

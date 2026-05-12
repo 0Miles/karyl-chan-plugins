@@ -38,6 +38,7 @@ export interface PluginServerOptions {
   commands?: CommandDefinition[];
   getToken: () => string | null;
   getDispatchHmacKey?: () => string | null;
+  getPublicBaseUrl?: () => string | undefined;
 }
 
 interface InteractionPayload {
@@ -286,6 +287,7 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
         hasCapability: (capKey: string): boolean =>
           capabilities.includes("admin") ||
           capabilities.includes(`plugin:${opts.pluginKey}:${capKey}`),
+        publicBaseUrl: opts.getPublicBaseUrl?.(),
         log: {
           info: (msg, meta) => server.log.info(meta ?? {}, msg),
           warn: (msg, meta) => server.log.warn(meta ?? {}, msg),
