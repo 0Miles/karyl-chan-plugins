@@ -10,7 +10,7 @@ and the advance loop, so it keeps its own package and docker service.
 
 | Sub-command | What it does |
 |---|---|
-| `play <source>` | Join your voice channel and play a station / library track / http(s) URL / YouTube playlist (replaces current) |
+| `play <source>` | Join your voice channel and play a station / library track / direct http(s) media URL / YouTube / SoundCloud/Bandcamp/Vimeo/… page link / YouTube playlist (replaces current) |
 | `queue <source>` | Append to the queue (also expands a YouTube playlist) |
 | `download <url>` | Download audio from a URL (YouTube, SoundCloud, direct media…) into the library |
 | `skip` / `back` | Skip to next / go back to the previous track |
@@ -22,10 +22,17 @@ and the advance loop, so it keeps its own package and docker service.
 | `manage` | Get a private link to the admin WebUI (requires the `plugin:karyl-radio:webui.access` capability — bot owners/admins exempt) |
 
 `source` for `play`/`queue` auto-resolves a station key, a library track
-title/ID, an http(s) media URL, or a YouTube URL. A YouTube link carrying
-a `list=` param given to `/radio play` (a Mix/radio share like
-`watch?v=…&list=RD…`, or a `/playlist?list=…`) also switches **autoplay
-on** for the guild; any other `play` source switches it off.
+title/ID, a direct http(s) media URL, a YouTube URL, or a track page on
+any yt-dlp-supported site (SoundCloud, Bandcamp, Vimeo, …). For the
+non-direct cases yt-dlp resolves a streaming URL on the fly — that URL is
+signed and short-lived, so it's fine for immediate playback but a track
+that may sit queued for a long time is better added via `/radio download`
+first. (HLS playlists still aren't supported by the ffmpeg pipeline, so
+the resolver prefers a progressive stream where the site offers one.)
+A YouTube link carrying a `list=` param given to `/radio play` (a
+Mix/radio share like `watch?v=…&list=RD…`, or a `/playlist?list=…`) also
+switches **autoplay on** for the guild; any other `play` source switches
+it off.
 
 ## Autoplay
 

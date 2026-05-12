@@ -20,12 +20,13 @@ export interface DownloadProgress {
   eta: string;
 }
 
-/** A YouTube URL resolved to a directly-streamable audio URL (+ metadata). */
+/** A page URL (YouTube / SoundCloud / …) resolved to a directly-streamable
+ *  audio URL (+ metadata). */
 export interface ResolvedStream {
   /** Direct CDN media URL ffmpeg can read. Time-limited (~hours). */
   streamUrl: string;
   title: string;
-  /** Thumbnail URL, if YouTube provided a plain http(s) one. */
+  /** Thumbnail URL, if the site provided a plain http(s) one. */
   coverUrl?: string;
   duration: number | null;
 }
@@ -115,18 +116,22 @@ export async function downloadAudio(
 }
 
 /**
- * Resolve a YouTube (or other yt-dlp-supported) page URL into a direct
- * audio stream URL ffmpeg can play, plus the title / thumbnail / duration.
- * Throws if yt-dlp fails or returns nothing usable. The stream URL is
- * signed and time-limited — fine for immediate playback, not for tracks
- * that may sit queued for hours (use `/radio download` for those).
+ * Resolve a page URL from any yt-dlp-supported site (YouTube, SoundCloud,
+ * Bandcamp, Vimeo, …) into a direct audio stream URL ffmpeg can play, plus
+ * the title / thumbnail / duration. Throws if yt-dlp fails or returns
+ * nothing usable. The stream URL is signed and time-limited — fine for
+ * immediate playback, not for tracks that may sit queued for hours (use
+ * `/radio download` for those).
+ *
+ * Format preference: `webm` audio first (YouTube's Opus), then the best
+ * *non-HLS* audio (e.g. SoundCloud's progressive MP3 — the ffmpeg
+ * pipeline streams those cleanly), then any best audio (HLS as a last
+ * resort), then any best.
  */
-export async function resolveYouTubeStreamUrl(
-  url: string,
-): Promise<ResolvedStream> {
+export async function resolveStreamUrl(url: string): Promise<ResolvedStream> {
   const out = await runYtDlp([
     "-f",
-    "bestaudio[ext=webm]/bestaudio/best",
+    "bestaudio[ext=webm]/bestaudio[protocol!=m3u8][protocol!=m3u8_native]/bestaudio/best",
     "--no-playlist",
     "--no-warnings",
     "--print",
@@ -146,7 +151,7 @@ export async function resolveYouTubeStreamUrl(
   if (!streamUrl) {
     throw new Error("yt-dlp returned no playable stream URL");
   }
-  const title = lines[0] && lines[0] !== "NA" ? lines[0] : "YouTube audio";
+  const title = lines[0] && lines[0] !== "NA" ? lines[0] : "audio";
   const thumb = lines[1];
   const coverUrl =
     thumb && thumb !== "NA" && SAFE_HTTPS_URL_RE.test(thumb)

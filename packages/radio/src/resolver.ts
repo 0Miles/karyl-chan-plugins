@@ -23,11 +23,48 @@ import {
   isYouTubePlaylistUrl,
   resolveMixRecommendations,
   resolvePlaylistEntries,
-  resolveYouTubeStreamUrl,
+  resolveStreamUrl,
   youtubeVideoIdFromUrl,
 } from "./downloader.js";
 import { findBySourceUrl, getTrack, searchTracks } from "./library.js";
 import { resolveTrack } from "./format.js";
+
+/**
+ * Best-effort probe: does `url` serve an HTML page (a track page that needs
+ * yt-dlp extraction — SoundCloud, Bandcamp, Vimeo, …) rather than a direct
+ * media file? A HEAD failure / non-HTML content type → treat it as direct
+ * media (play it as-is). 5 s budget; follows redirects.
+ */
+async function looksLikeWebpage(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(5_000),
+    });
+    const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+    return ct.startsWith("text/html") || ct.startsWith("application/xhtml");
+  } catch {
+    return false;
+  }
+}
+
+/** A page URL (YouTube / SoundCloud / …) resolved to a streaming Track. */
+function streamTrack(
+  pageUrl: string,
+  r: { streamUrl: string; title: string; coverUrl?: string },
+  userId: string | null,
+): Track {
+  return {
+    url: r.streamUrl,
+    label: r.title,
+    queuedBy: userId,
+    // Keep the page URL — the stream URL is opaque & time-limited; a
+    // replay re-resolves a fresh one, and YouTube autoplay seeds off it.
+    originUrl: pageUrl,
+    ...(r.coverUrl ? { coverUrl: r.coverUrl } : {}),
+  };
+}
 
 /** Docker-internal URL the bot uses to stream library files (voice.play). */
 const PLUGIN_URL = (process.env.PLUGIN_URL || "http://localhost:3000").replace(
@@ -66,10 +103,14 @@ export { isYouTubePlaylistUrl };
  * Resolve a single `source` into a playable Track. Order:
  *   1. library track by id, then by title substring
  *   2. if `source` is a URL we've already downloaded → that local file
- *   3. else if it's a YouTube URL → resolved to a direct audio stream
- *   4. else → radio station / arbitrary http(s) URL streamed as-is
- * Returns null when nothing matches; **throws** if a YouTube URL fails
- * to resolve (so callers can surface why).
+ *   3. YouTube URL → yt-dlp resolves a direct audio stream
+ *   4. other http(s) URL that serves an HTML page (SoundCloud / Bandcamp /
+ *      Vimeo / … track page) → yt-dlp resolves a stream; if yt-dlp can't,
+ *      fall through to (5)
+ *   5. else → radio station key / direct http(s) media URL streamed as-is
+ * Returns null when nothing matches; **throws** if a YouTube URL fails to
+ * resolve (so callers can surface why); for case (4) a yt-dlp failure is
+ * swallowed and the URL is handed to ffmpeg raw instead.
  */
 export async function resolveAnyTrack(
   source: string,
@@ -86,18 +127,19 @@ export async function resolveAnyTrack(
   if (isHttpUrl(s)) {
     const downloaded = await findBySourceUrl(s);
     if (downloaded) return libraryTrackToTrack(downloaded, userId);
-  }
-  if (isYouTubeUrl(s)) {
-    const r = await resolveYouTubeStreamUrl(s);
-    return {
-      url: r.streamUrl,
-      label: r.title,
-      queuedBy: userId,
-      // Keep the watch URL — the stream URL is opaque; autoplay seeds
-      // recommendations off this, and a replay re-resolves a fresh stream.
-      originUrl: s,
-      ...(r.coverUrl ? { coverUrl: r.coverUrl } : {}),
-    };
+
+    if (isYouTubeUrl(s)) {
+      return streamTrack(s, await resolveStreamUrl(s), userId);
+    }
+    // A non-YouTube page URL (SoundCloud / Bandcamp / …) → extract a
+    // stream via yt-dlp. A direct media URL → skip straight to raw play.
+    if (await looksLikeWebpage(s)) {
+      try {
+        return streamTrack(s, await resolveStreamUrl(s), userId);
+      } catch {
+        /* yt-dlp couldn't extract — fall through to raw play */
+      }
+    }
   }
   return resolveTrack(s, userId);
 }
