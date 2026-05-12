@@ -25,8 +25,11 @@ import {
 import { isHttpUrl, isYouTubePlaylistUrl } from "./downloader.js";
 import { downloadAndStore } from "./library.js";
 import {
+  effectiveBase,
   registerWebRoutes,
+  setPublicUrlEnvFallback,
   setRadioBotRpc,
+  setRadioPublicBaseUrl,
   setRadioSessionVerifyKey,
 } from "./web-routes.js";
 import {
@@ -47,12 +50,15 @@ export const seenGuilds = new Set<string>();
  *  pluginKey half of the `plugin:<key>:webui.access` capability token. */
 const PLUGIN_KEY = "karyl-radio";
 
-/** Where the WebUI is reachable from a browser (NOT the Docker-internal
- *  PLUGIN_URL). Used for the `/radio manage` link and the play-response
- *  buttons. Override in production behind a reverse proxy / tunnel. */
-const RADIO_PUBLIC_URL = (
-  process.env.RADIO_PUBLIC_URL || "http://localhost:903"
-).replace(/\/+$/, "");
+/** Env-var fallback for the browser-reachable base URL. Only used when the
+ *  bot hasn't yet returned a publicBaseUrl (pre-register or no WEB_BASE_URL). */
+const RADIO_PUBLIC_URL_ENV = process.env.RADIO_PUBLIC_URL
+  ? process.env.RADIO_PUBLIC_URL.replace(/\/+$/, "")
+  : undefined;
+
+// Propagate env fallback into web-routes.ts at module init time so
+// effectiveBase() can use it before any SDK wiring happens.
+setPublicUrlEnvFallback(RADIO_PUBLIC_URL_ENV);
 
 const EMBED_COLOR = 0x5865f2;
 
@@ -108,7 +114,7 @@ async function playbackReply(
 ): Promise<CommandReply> {
   const token = await getSessionToken(ctx, guildId);
   const components = token
-    ? [linkButtonRow("🎛 Open WebUI", `${RADIO_PUBLIC_URL}/?token=${token}`)]
+    ? [linkButtonRow("🎛 Open WebUI", `${effectiveBase()}/?token=${token}`)]
     : undefined;
   // Ephemeral: plugin command replies are deferred ephemeral by the bot,
   // and the button embeds a session token — keep it visible only to the
@@ -353,7 +359,7 @@ export default function buildPlugin() {
                     components: [
                       linkButtonRow(
                         "🔧 Open admin WebUI",
-                        `${RADIO_PUBLIC_URL}/?token=${res.token}`,
+                        `${effectiveBase()}/?token=${res.token}`,
                       ),
                     ],
                     ephemeral: true,
@@ -597,12 +603,13 @@ export default function buildPlugin() {
       }),
     ],
     onReady: async (server) => {
-      await registerWebRoutes(server, PLUGIN_KEY, RADIO_PUBLIC_URL, seenGuilds);
+      await registerWebRoutes(server, PLUGIN_KEY, effectiveBase, seenGuilds);
     },
   });
 }
 
-// Re-export so index.ts can wire deferred dependencies (bot RPC client +
-// the bot's plugin-session JWT verify key) into the WebUI routes once
-// start() resolves (onReady runs before the lifecycle client exists).
-export { setRadioBotRpc, setRadioSessionVerifyKey };
+// Re-export so index.ts can wire deferred dependencies (bot RPC client,
+// the bot's plugin-session JWT verify key, and the publicBaseUrl getter)
+// into the WebUI routes once start() resolves (onReady runs before the
+// lifecycle client exists).
+export { setRadioBotRpc, setRadioPublicBaseUrl, setRadioSessionVerifyKey };

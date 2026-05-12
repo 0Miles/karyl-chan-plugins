@@ -145,10 +145,20 @@
   </div>
   <div id="toast"></div>
 
+  <!-- Default for __PLUGIN_BASE__: set to "" so direct-access (http://localhost:903)
+       works without any server injection. When served through the bot proxy, the
+       server injects <script>window.__PLUGIN_BASE__="/plugin/karyl-radio"</script>
+       earlier in <head>, and the || keeps it. -->
+  <script>window.__PLUGIN_BASE__=window.__PLUGIN_BASE__||"";</script>
   <script>
   (function () {
     "use strict";
-    const API = window.location.origin;
+    // Under the bot proxy: window.location.origin is the bot's origin (e.g.
+    // http://localhost:902) and __PLUGIN_BASE__ is "/plugin/karyl-radio",
+    // so API = "http://localhost:902/plugin/karyl-radio" — all fetch calls
+    // hit the bot's reverse-proxy, which forwards to the radio plugin.
+    // In direct-access mode: __PLUGIN_BASE__ is "" so API = location.origin.
+    const API = window.location.origin + (window.__PLUGIN_BASE__ || "");
     const root = document.getElementById("root");
     const modeLabel = document.getElementById("mode-label");
     const toastEl = document.getElementById("toast");
@@ -160,6 +170,8 @@
       if (fromUrl) {
         sessionStorage.setItem("radio_token", fromUrl);
         u.searchParams.delete("token");
+        // Under the proxy u.pathname is /plugin/karyl-radio/ — the prefix
+        // is preserved automatically; no extra handling needed.
         history.replaceState(null, "", u.pathname + (u.search || "") + (u.hash || ""));
         return fromUrl;
       }

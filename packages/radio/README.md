@@ -25,16 +25,27 @@ title/ID, an http(s) media URL, or a YouTube URL.
 
 ## WebUI
 
-`/radio np`, `/radio manage`, and the play replies hand back a link
-(`RADIO_PUBLIC_URL`, default `http://localhost:903`) carrying a short-lived
-`plugin-session` JWT. The WebUI server (in `src/web-routes.ts`) verifies
-that token **offline** with the bot's Ed25519 public key (the SDK's
-`verifyPluginSession`) — there's no shared secret; the bot signs with a
-private key that never leaves it. `manage` tokens carry the user's
-capabilities and gate the library-management routes; session tokens are
-guild-scoped and gate playback control. An admin rotating the bot's JWT
-signing key invalidates outstanding links; the plugin picks up the new
-public key on its next heartbeat.
+The WebUI is normally reached via the **bot proxy**:
+`<WEB_BASE_URL>/plugin/karyl-radio/` (e.g. `http://localhost:902/plugin/karyl-radio/`).
+No per-plugin TLS certificate or public port is required — the bot handles
+TLS termination and reverse-proxies the traffic. The bot includes the
+`publicBaseUrl` in its register and heartbeat responses; the SDK surfaces it
+via `StartedPlugin.getPublicBaseUrl()`, and the radio plugin uses it to build
+the `/radio manage` link, play-response buttons, and cover image URLs.
+
+`RADIO_PUBLIC_URL` is an optional fallback/override — only needed for
+direct-access debugging (re-add the `ports:` mapping in docker-compose and
+set `RADIO_PUBLIC_URL`). In production with `WEB_BASE_URL` configured on the
+bot, leave it unset.
+
+`/radio np`, `/radio manage`, and the play replies hand back a link carrying a
+short-lived `plugin-session` JWT. The WebUI server (in `src/web-routes.ts`)
+verifies that token **offline** with the bot's Ed25519 public key (the SDK's
+`verifyPluginSession`) — there's no shared secret; the bot signs with a private
+key that never leaves it. `manage` tokens carry the user's capabilities and gate
+the library-management routes; session tokens are guild-scoped and gate playback
+control. An admin rotating the bot's JWT signing key invalidates outstanding
+links; the plugin picks up the new public key on its next heartbeat.
 
 ## Runtime dependencies
 

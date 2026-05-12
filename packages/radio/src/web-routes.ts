@@ -55,11 +55,11 @@ const NON_AUDIO_RE = /(^library\.json$)|(\.tmp$)/;
 
 // ── Deferred wiring from index.ts ─────────────────────────────────────────
 // The WebUI routes need things the SDK only produces *after* start()
-// resolves — the bot RPC client (voice.play / voice.status) and the
+// resolves — the bot RPC client (voice.play / voice.status), the
 // Ed25519 public key the bot hands back at register (for verifying
-// plugin-session JWTs). These routes are registered in `onReady`, which
-// runs before the lifecycle client exists, so index.ts injects both
-// once start() resolves.
+// plugin-session JWTs), and the bot-provided publicBaseUrl. These routes
+// are registered in `onReady`, which runs before the lifecycle client
+// exists, so index.ts injects all three once start() resolves.
 type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
 let _botRpc: BotRpc | null = null;
 export function setRadioBotRpc(fn: BotRpc): void {
@@ -70,6 +70,30 @@ let _sessionVerifyKey: (() => string | null) | null = null;
 /** Wire the getter for the bot's plugin-session JWT verify key (SPKI PEM). */
 export function setRadioSessionVerifyKey(getter: () => string | null): void {
   _sessionVerifyKey = getter;
+}
+
+let _publicBaseUrlGetter: (() => string | undefined) | null = null;
+/** Wire the getter for the SDK-provided publicBaseUrl (set after start()). */
+export function setRadioPublicBaseUrl(getter: () => string | undefined): void {
+  _publicBaseUrlGetter = getter;
+}
+
+/** Env-var fallback — imported from plugin.ts via the same module. */
+let _publicUrlEnvFallback: string | undefined;
+/** Set the env-var fallback value (called once from plugin.ts at module init). */
+export function setPublicUrlEnvFallback(value: string | undefined): void {
+  _publicUrlEnvFallback = value;
+}
+
+/**
+ * Effective browser-reachable base URL for this plugin's HTTP surface.
+ * Precedence: SDK publicBaseUrl (from bot) → RADIO_PUBLIC_URL env → last-resort default.
+ */
+export function effectiveBase(): string {
+  const sdkUrl = _publicBaseUrlGetter?.();
+  if (sdkUrl) return sdkUrl.replace(/\/+$/, "");
+  if (_publicUrlEnvFallback) return _publicUrlEnvFallback;
+  return "http://localhost:903";
 }
 
 const activeDownloads = new Map<
@@ -135,8 +159,13 @@ const MAX_COVER_BYTES = 5 * 1024 * 1024;
 export async function registerWebRoutes(
   server: FastifyInstance,
   pluginKey: string,
-  /** Browser-reachable base URL — used to build cover image URLs. */
-  publicUrl: string,
+  /**
+   * Getter for the browser-reachable base URL — called per-request so a
+   * late-arriving publicBaseUrl from the bot is reflected immediately.
+   * Used to build cover image URLs and to inject `window.__PLUGIN_BASE__`
+   * into the served HTML.
+   */
+  getEffectiveBase: () => string,
   /**
    * The set of guilds the auto-advance loop ticks over (owned by
    * plugin.ts). The advance loop is the ONLY thing that auto-plays the
@@ -285,7 +314,7 @@ export async function registerWebRoutes(
 
   // Upload an image file to use as the track's cover. multipart/form-data
   // with a single `file` part. Stored under COVER_DIR/<trackId>.<ext>;
-  // coverUrl is set to <publicUrl>/cover/<filename>.
+  // coverUrl is set to <effectiveBase()>/cover/<filename>.
   server.post<{ Params: { id: string } }>(
     "/api/tracks/:id/cover",
     async (request, reply) => {
@@ -318,12 +347,12 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "Empty file" });
       }
       const filename = await saveCover(id, buf, ext);
-      const coverUrl = `${publicUrl}/cover/${filename}`;
+      const coverUrl = `${getEffectiveBase()}/cover/${filename}`;
       try {
         const updated = await updateTrack(id, { coverUrl });
         return { track: updated };
       } catch (err) {
-        // updateTrack rejected the URL (e.g. RADIO_PUBLIC_URL misconfigured)
+        // updateTrack rejected the URL (e.g. effectiveBase() misconfigured)
         // — don't leave the just-written file orphaned.
         await deleteCoverFor(id);
         return reply.code(500).send({
@@ -707,6 +736,19 @@ export async function registerWebRoutes(
     );
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
-    return reply.send(htmlContent);
+
+    // Inject the path part of effectiveBase() so the SPA knows its prefix
+    // when served through the bot proxy (e.g. /plugin/karyl-radio). Done
+    // per-request so a late-arriving publicBaseUrl is picked up immediately.
+    let basePath = "";
+    try {
+      basePath = new URL(getEffectiveBase()).pathname.replace(/\/+$/, "");
+    } catch {
+      // Malformed URL — leave basePath empty; SPA falls back to same-origin.
+    }
+    const injectedScript = `<script>window.__PLUGIN_BASE__=${JSON.stringify(basePath)}</script>`;
+    const html = htmlContent.replace("<head>", `<head>${injectedScript}`);
+
+    return reply.send(html);
   });
 }
