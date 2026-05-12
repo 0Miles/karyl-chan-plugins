@@ -299,7 +299,7 @@
           const li = el(
             '<li class="item"><span class="idx">' + (i + 1) + '.</span>' + thumb +
             '<div class="info"><div class="name">' + esc(t.label) + '</div>' +
-            '<div class="dim">' + (t.queuedBy ? "queued by &lt;@" + esc(t.queuedBy) + "&gt;" : "") + '</div></div>' +
+            '<div class="dim">' + (t.queuedByName || t.queuedBy ? "queued by " + esc(t.queuedByName || t.queuedBy) : "") + '</div></div>' +
             '<div class="actions"><button class="ghost sm" title="Remove">✕</button></div></li>'
           );
           li.querySelector("button").onclick = () =>
@@ -328,7 +328,7 @@
           cover +
           '<div class="meta">' +
           '<div class="title">' + (cur ? esc(cur.label) : '<span style="color:var(--text-dim)">Nothing playing</span>') + '</div>' +
-          '<div class="sub">' + (cur && cur.queuedBy ? "queued by &lt;@" + esc(cur.queuedBy) + "&gt; · " : "") + esc(where) + '</div>' +
+          '<div class="sub">' + (cur && (cur.queuedByName || cur.queuedBy) ? "queued by " + esc(cur.queuedByName || cur.queuedBy) + " · " : "") + esc(where) + '</div>' +
           '<span class="badge">' + loopBadge(snap.loop) + '</span>' +
           '</div>';
         ctrlEl.innerHTML = "";
@@ -358,7 +358,7 @@
             const li = el(
               '<li class="item">' + thumb +
               '<div class="info"><div class="name">' + esc(t.label) + '</div>' +
-              '<div class="dim">' + (t.queuedBy ? "queued by &lt;@" + esc(t.queuedBy) + "&gt;" : "") + '</div></div>' +
+              '<div class="dim">' + (t.queuedByName || t.queuedBy ? "queued by " + esc(t.queuedByName || t.queuedBy) : "") + '</div></div>' +
               '<div class="actions"><button class="ghost sm" title="Re-queue this track">↻</button></div></li>'
             );
             li.querySelector("button").onclick = () =>

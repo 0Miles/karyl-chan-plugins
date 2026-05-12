@@ -156,13 +156,18 @@ export async function playTrack(
     if (resolved.trackId) {
       // It's been downloaded since — the local file is stable, stop being lazy.
       playUrl = resolved.url;
-      toStore = { ...resolved, queuedBy: track.queuedBy };
+      toStore = {
+        ...resolved,
+        queuedBy: track.queuedBy,
+        ...(track.queuedByName ? { queuedByName: track.queuedByName } : {}),
+      };
     } else {
       playUrl = resolved.url;
       toStore = {
         url: track.url, // keep the watch URL — re-resolvable next time
         label: resolved.label,
         queuedBy: track.queuedBy,
+        ...(track.queuedByName ? { queuedByName: track.queuedByName } : {}),
         needsResolve: true,
         ...(resolved.coverUrl ? { coverUrl: resolved.coverUrl } : {}),
       };

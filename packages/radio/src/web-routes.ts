@@ -119,6 +119,7 @@ function publicTrack(t: Track): Record<string, unknown> {
   return {
     label: t.label,
     queuedBy: t.queuedBy,
+    ...(t.queuedByName ? { queuedByName: t.queuedByName } : {}),
     ...(t.trackId ? { trackId: t.trackId } : {}),
     ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
   };

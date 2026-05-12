@@ -32,8 +32,14 @@ export type LoopMode = "off" | "track" | "queue";
 export interface Track {
   url: string;
   label: string;
-  /** Discord user id who queued it (for "queued by"). */
+  /** Discord user id who queued it (for "queued by" mentions in Discord). */
   queuedBy: string | null;
+  /**
+   * Display name of whoever queued it, captured at enqueue time — used by
+   * the WebUI (which can't render a `<@id>` mention). Absent for tracks
+   * queued from the WebUI itself (no per-action user) or by an older bot.
+   */
+  queuedByName?: string;
   /** Library track id, when this track came from the downloaded library. */
   trackId?: string;
   /** Cover image URL (library metadata), for the WebUI now-playing card. */

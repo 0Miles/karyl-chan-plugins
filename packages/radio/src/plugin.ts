@@ -510,13 +510,17 @@ export default function buildPlugin() {
                     }
                     if (tracks.length === 0)
                       return "⚠ That playlist is empty or unavailable.";
-                    for (const t of tracks) enqueue(guildId, t);
+                    for (const t of tracks) {
+                      t.queuedByName = ctx.userDisplayName;
+                      enqueue(guildId, t);
+                    }
                     return playbackReply(ctx, guildId, {
                       description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
                     });
                   }
                   const resolved = await resolveSourceOrError(source, userId);
                   if (typeof resolved === "string") return resolved;
+                  resolved.queuedByName = ctx.userDisplayName;
                   const position = enqueue(guildId, resolved);
                   return playbackReply(ctx, guildId, {
                     description: `➕ Queued **${resolved.label}** (position ${position}).`,
@@ -549,7 +553,10 @@ export default function buildPlugin() {
                       return "⚠ That playlist is empty or unavailable.";
                     const joinErr = await joinFirst();
                     if (joinErr) return joinErr;
-                    for (const t of tracks) enqueue(guildId, t);
+                    for (const t of tracks) {
+                      t.queuedByName = ctx.userDisplayName;
+                      enqueue(guildId, t);
+                    }
                     // Start the first that resolves (skip a few dead ones).
                     let started: Track | null = null;
                     for (let i = 0; i < 5 && !started; i++) {
@@ -579,6 +586,7 @@ export default function buildPlugin() {
 
                   const resolved = await resolveSourceOrError(source, userId);
                   if (typeof resolved === "string") return resolved;
+                  resolved.queuedByName = ctx.userDisplayName;
                   const joinErr = await joinFirst();
                   if (joinErr) return joinErr;
                   const o = await startTrack(ctx, guildId, resolved);
