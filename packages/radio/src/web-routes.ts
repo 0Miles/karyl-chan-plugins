@@ -35,6 +35,7 @@ import {
   dequeueAt,
   enqueue,
   getState,
+  setAutoplay,
   setLoop,
 } from "./queue.js";
 import { doNext, doPrev } from "./playback-actions.js";
@@ -138,6 +139,7 @@ async function sessionSnapshot(
     guildId,
     channelId,
     loop: s?.loop ?? "off",
+    autoplay: s?.autoplay ?? false,
     current: s?.current ? publicTrack(s.current) : null,
     queue: (s?.queue ?? []).map(publicTrack),
     queueLength: s?.queue.length ?? 0,
@@ -510,6 +512,29 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "mode must be off/track/queue" });
       }
       setLoop(guildId, mode as LoopMode);
+      return syncAndSnapshot(guildId);
+    },
+  );
+
+  server.post<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/autoplay",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      if (!authSession(request, reply, guildId)) return;
+      keepAdvancing(guildId);
+      let body: { on?: unknown };
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { on?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      if (typeof body?.on !== "boolean") {
+        return reply.code(400).send({ error: "`on` (boolean) required" });
+      }
+      setAutoplay(guildId, body.on);
       return syncAndSnapshot(guildId);
     },
   );
