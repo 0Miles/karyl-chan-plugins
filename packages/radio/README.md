@@ -16,12 +16,31 @@ and the advance loop, so it keeps its own package and docker service.
 | `skip` / `back` | Skip to next / go back to the previous track |
 | `loop <off\|track\|queue>` | Set the loop mode |
 | `stop` | Stop, clear the queue, leave voice |
-| `np` / `queuelist` | Now-playing (+ WebUI link) / show the queue |
+| `np` / `queuelist` | Now-playing card (the embed + control buttons below; ephemeral, not auto-updated) / show the queue |
 | `stations` | List the built-in radio stations |
 | `manage` | Get a private link to the admin WebUI (requires the `plugin:karyl-radio:webui.access` capability — bot owners/admins exempt) |
 
 `source` for `play`/`queue` auto-resolves a station key, a library track
 title/ID, an http(s) media URL, or a YouTube URL.
+
+## Now-playing message
+
+While a guild has an active playback session the plugin keeps **one
+public embed in the bot's voice-channel text chat** — current track,
+queue size, loop/pause state — with control buttons (⏮ prev · ⏯
+play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle) plus a "🎛 WebUI" link.
+It's edited in place on every state change (a `/radio` command, a WebUI
+action, or the auto-advance loop moving to the next track) and deleted
+when the session ends (the bot leaves voice, `/radio stop`, or the queue
+runs dry). Edits are change-gated, so a steady radio stream causes none.
+
+Only members **currently in the bot's voice channel** can use the control
+buttons (others get an ephemeral nudge); the WebUI link button stays valid
+for the whole session. The buttons reach the plugin via the bot's
+component-dispatch path (`kc:karyl-radio:<action>` custom ids); see the
+bot's `docs/development/plugin-guide.md`. `/radio np` returns the same
+embed + buttons template, ephemeral — but it isn't auto-updated; only its
+own buttons edit it.
 
 ## WebUI
 
@@ -49,7 +68,8 @@ links; the plugin picks up the new public key on its next heartbeat.
 
 ## Runtime dependencies
 
-- the bot's voice RPC (`voice.join` / `voice.play` / `voice.status` / …) — the plugin does no audio I/O of its own beyond resolving/downloading
+- the bot's voice RPC (`voice.join` / `voice.play` / `voice.pause` / `voice.stop` / `voice.status`) — the plugin does no audio I/O of its own beyond resolving/downloading
+- `messages.send` / `messages.edit` / `messages.delete` (the now-playing message) and the component-dispatch path (the control buttons) — needs a bot recent enough to provide them
 - `ffmpeg` and `yt-dlp` in the container (see `Dockerfile.radio`)
 - volumes for the library and cover images (`MUSIC_DIR` / `COVER_DIR`; mapped in the monorepo `docker-compose.yml`)
 
