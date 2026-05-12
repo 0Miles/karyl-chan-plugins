@@ -45,6 +45,14 @@ export interface Track {
   /** Cover image URL (library metadata), for the WebUI now-playing card. */
   coverUrl?: string;
   /**
+   * The original *page* URL this track was sourced from — a YouTube
+   * watch URL — kept even after the link has been resolved to a
+   * (signed, opaque) CDN stream URL. Used as the seed for autoplay
+   * recommendations (see advance-loop.ts). Absent for stations, direct
+   * media URLs, and library tracks not sourced from YouTube.
+   */
+  originUrl?: string;
+  /**
    * When true, `url` is a *page* URL (e.g. a YouTube watch URL queued
    * from a playlist) that must be re-resolved to a playable stream URL
    * — or to the local library file if it's since been downloaded —
@@ -82,6 +90,23 @@ export interface GuildState {
    */
   playLog: PlayLogEntry[];
   loop: LoopMode;
+  /**
+   * When true, the auto-advance loop keeps the queue topped up with
+   * YouTube "mix" recommendations seeded from the most recent YouTube
+   * track this session (see advance-loop.ts) — so playback continues
+   * past the end of the queue. Off by default; only acts while
+   * `loop === "off"`. Set via `/radio autoplay`, the WebUI toggle, or
+   * automatically when a `/radio play` source is a YouTube URL carrying
+   * a `list=` param. Survives a dry queue; reset by `/radio stop`.
+   */
+  autoplay: boolean;
+  /**
+   * The YouTube video id we last generated autoplay recommendations
+   * from. Set before the (slow) yt-dlp fetch so a still-running or
+   * fruitless fetch doesn't re-trigger every tick; cleared when
+   * autoplay is turned off.
+   */
+  autoplaySeededFrom: string | null;
 }
 
 /** How many played tracks to remember for the "previous" button. */
@@ -96,7 +121,15 @@ const states = new Map<string, GuildState>();
 function ensure(guildId: string): GuildState {
   let s = states.get(guildId);
   if (!s) {
-    s = { current: null, queue: [], history: [], playLog: [], loop: "off" };
+    s = {
+      current: null,
+      queue: [],
+      history: [],
+      playLog: [],
+      loop: "off",
+      autoplay: false,
+      autoplaySeededFrom: null,
+    };
     states.set(guildId, s);
   }
   return s;
@@ -151,6 +184,16 @@ export function dequeueAt(guildId: string, index: number): Track | null {
 
 export function setLoop(guildId: string, mode: LoopMode): void {
   ensure(guildId).loop = mode;
+}
+
+/**
+ * Turn autoplay on/off for a guild. Turning it off also clears the
+ * "last seeded from" marker so re-enabling it later starts fresh.
+ */
+export function setAutoplay(guildId: string, on: boolean): void {
+  const s = ensure(guildId);
+  s.autoplay = on;
+  if (!on) s.autoplaySeededFrom = null;
 }
 
 export function hasPrevious(guildId: string): boolean {

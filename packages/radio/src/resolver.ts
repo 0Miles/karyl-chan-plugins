@@ -21,8 +21,10 @@ import {
   isHttpUrl,
   isYouTubeUrl,
   isYouTubePlaylistUrl,
+  resolveMixRecommendations,
   resolvePlaylistEntries,
   resolveYouTubeStreamUrl,
+  youtubeVideoIdFromUrl,
 } from "./downloader.js";
 import { findBySourceUrl, getTrack, searchTracks } from "./library.js";
 import { resolveTrack } from "./format.js";
@@ -35,15 +37,26 @@ const PLUGIN_URL = (process.env.PLUGIN_URL || "http://localhost:3000").replace(
 
 /** Turn a stored library track into a playable Track (served from disk). */
 export function libraryTrackToTrack(
-  t: { id: string; filename: string; title: string; coverUrl?: string },
+  t: {
+    id: string;
+    filename: string;
+    title: string;
+    coverUrl?: string;
+    /** The URL it was downloaded from — kept as `originUrl` when it's a
+     *  YouTube link so autoplay can seed recommendations from it. */
+    sourceUrl?: string;
+  },
   userId: string | null,
 ): Track {
+  const originUrl =
+    t.sourceUrl && isYouTubeUrl(t.sourceUrl) ? t.sourceUrl : undefined;
   return {
     url: `${PLUGIN_URL}/internal/audio/${encodeURIComponent(t.filename)}`,
     label: t.title,
     queuedBy: userId,
     trackId: t.id,
     ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
+    ...(originUrl ? { originUrl } : {}),
   };
 }
 
@@ -80,10 +93,47 @@ export async function resolveAnyTrack(
       url: r.streamUrl,
       label: r.title,
       queuedBy: userId,
+      // Keep the watch URL — the stream URL is opaque; autoplay seeds
+      // recommendations off this, and a replay re-resolves a fresh stream.
+      originUrl: s,
       ...(r.coverUrl ? { coverUrl: r.coverUrl } : {}),
     };
   }
   return resolveTrack(s, userId);
+}
+
+/**
+ * The YouTube video id this track was sourced from — its `originUrl`, or
+ * `url` if that is itself a YouTube watch URL. Null for non-YouTube
+ * tracks (stations, direct media, library tracks not from YouTube). Used
+ * to seed / de-duplicate autoplay recommendations.
+ */
+export function youtubeVideoIdOf(track: Track): string | null {
+  return (
+    (track.originUrl ? youtubeVideoIdFromUrl(track.originUrl) : null) ??
+    youtubeVideoIdFromUrl(track.url)
+  );
+}
+
+/**
+ * The YouTube "mix" radio for `videoId` as queue-ready *lazy* Tracks
+ * (each `needsResolve`, `url` = the watch URL — resolved to a stream
+ * right before playback, like playlist entries). The autoplay loop in
+ * advance-loop.ts seeds the queue from these; the first entry is usually
+ * the seed video itself, so the caller de-duplicates. Throws on yt-dlp
+ * failure; returns [] for an invalid id or an empty / unavailable mix.
+ */
+export async function resolveAutoplayRecommendations(
+  videoId: string,
+): Promise<Track[]> {
+  const entries = await resolveMixRecommendations(videoId);
+  return entries.map((e) => ({
+    url: e.url,
+    label: e.title,
+    queuedBy: null,
+    queuedByName: "Autoplay",
+    needsResolve: true,
+  }));
 }
 
 /**

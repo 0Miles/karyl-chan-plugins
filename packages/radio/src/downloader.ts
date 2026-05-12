@@ -207,6 +207,25 @@ export async function resolvePlaylistEntries(
   return entries;
 }
 
+/** Max entries pulled from a YouTube auto-mix when seeding autoplay. */
+export const MIX_FETCH_MAX = 25;
+
+/**
+ * Pull the auto-generated YouTube "Mix" radio for `videoId`
+ * (`watch?v=<id>&list=RD<id>`) as flat entries — used to seed autoplay
+ * recommendations. The first entry is usually the seed video itself, so
+ * callers de-duplicate. Throws on yt-dlp failure; returns [] for an
+ * invalid id or an empty / unavailable mix.
+ */
+export async function resolveMixRecommendations(
+  videoId: string,
+): Promise<PlaylistEntry[]> {
+  if (!/^[\w-]{11}$/.test(videoId)) return [];
+  return resolvePlaylistEntries(
+    `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`,
+  );
+}
+
 /** Default hard timeout for a yt-dlp invocation (the long download path
  *  passes a bigger value explicitly). Without this a hung yt-dlp could
  *  block the 5 s advance loop forever. */
@@ -316,6 +335,22 @@ export function isYouTubePlaylistUrl(s: string): boolean {
   );
 }
 
+/**
+ * True iff `s` is a YouTube URL carrying a non-empty `list=` query param
+ * — a Mix/radio share (`watch?v=X&list=RD…`) or a `/playlist?list=…`.
+ * The radio plugin treats such a link as "keep this going" and switches
+ * autoplay on for the guild.
+ */
+export function isYouTubeUrlWithList(s: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return false;
+  }
+  return isYouTubeUrl(s) && !!u.searchParams.get("list");
+}
+
 /** Extract the 11-char YouTube video id from a watch / youtu.be / embed URL. */
 function youtubeVideoId(u: URL): string | null {
   if (u.hostname === "youtu.be") {
@@ -328,6 +363,22 @@ function youtubeVideoId(u: URL): string | null {
   // longer (junk-padded) path can't be silently truncated to 11 chars.
   const m = u.pathname.match(/^\/(?:embed|shorts|v)\/([\w-]{11})(?:[/?#]|$)/);
   return m ? m[1] : null;
+}
+
+/**
+ * The 11-char YouTube video id from any watch / youtu.be / embed /
+ * shorts / music URL string, or null if `s` isn't a parseable YouTube
+ * video URL. (Public wrapper over the internal URL-form helper.)
+ */
+export function youtubeVideoIdFromUrl(s: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (!isYouTubeUrl(s)) return null;
+  return youtubeVideoId(u);
 }
 
 /**

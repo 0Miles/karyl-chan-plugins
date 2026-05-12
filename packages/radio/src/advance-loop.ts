@@ -1,6 +1,18 @@
 import type { Logger } from "@karyl-chan/plugin-sdk";
-import { advance, getState, requeueFront, setCurrent } from "./queue.js";
-import { playTrack } from "./resolver.js";
+import {
+  type GuildState,
+  type Track,
+  advance,
+  enqueue,
+  getState,
+  requeueFront,
+  setCurrent,
+} from "./queue.js";
+import {
+  playTrack,
+  resolveAutoplayRecommendations,
+  youtubeVideoIdOf,
+} from "./resolver.js";
 import * as nowPlaying from "./now-playing.js";
 
 type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
@@ -17,6 +29,84 @@ const inFlight = new Set<string>();
 function isIdle(guildId: string): boolean {
   const s = getState(guildId);
   return !s || (!s.current && s.queue.length === 0 && s.loop === "off");
+}
+
+/** Video id to seed autoplay from: the current track's YouTube origin if
+ *  it has one, else the most recently played YouTube track this session. */
+function autoplaySeedVideoId(s: GuildState): string | null {
+  const fromCurrent = s.current ? youtubeVideoIdOf(s.current) : null;
+  if (fromCurrent) return fromCurrent;
+  for (let i = s.playLog.length - 1; i >= 0; i--) {
+    const id = youtubeVideoIdOf(s.playLog[i].track);
+    if (id) return id;
+  }
+  return null;
+}
+
+/**
+ * Autoplay: when a guild has `autoplay` on, isn't looping, and the queue
+ * is empty, fetch the YouTube "mix" radio seeded from the most recent
+ * YouTube track and append the first recommendation we haven't already
+ * played / queued this session. Runs *before* the advance step (so a
+ * just-ended track is replaced with no gap) and also proactively while a
+ * track is still playing (so the next one is queued ahead of time).
+ *
+ * `autoplaySeededFrom` is set to the seed id *before* the (slow) yt-dlp
+ * call so a still-running fetch — or a seed that yields nothing fresh —
+ * doesn't re-trigger every 5 s tick; the next refill only fires once a
+ * *different* track becomes the seed. Errors are swallowed (a yt-dlp
+ * hiccup must not break the advance loop).
+ */
+async function maybeAutoplayRefill(
+  guildId: string,
+  log: Logger,
+): Promise<void> {
+  const s = getState(guildId);
+  if (!s || !s.autoplay || s.loop !== "off" || s.queue.length > 0) return;
+  const seedId = autoplaySeedVideoId(s);
+  if (!seedId || seedId === s.autoplaySeededFrom) return;
+  s.autoplaySeededFrom = seedId;
+
+  let recs: Track[];
+  try {
+    recs = await resolveAutoplayRecommendations(seedId);
+  } catch (err) {
+    log.warn("autoplay: mix fetch failed", {
+      guildId,
+      seedId,
+      err: String(err),
+    });
+    return;
+  }
+
+  // Skip the seed itself and anything already played / queued this session.
+  const seen = new Set<string>([seedId]);
+  if (s.current) {
+    const id = youtubeVideoIdOf(s.current);
+    if (id) seen.add(id);
+  }
+  for (const e of s.playLog) {
+    const id = youtubeVideoIdOf(e.track);
+    if (id) seen.add(id);
+  }
+  for (const q of s.queue) {
+    const id = youtubeVideoIdOf(q);
+    if (id) seen.add(id);
+  }
+  const pick = recs.find((t) => {
+    const id = youtubeVideoIdOf(t);
+    return id !== null && !seen.has(id);
+  });
+  if (!pick) {
+    log.info("autoplay: mix had nothing fresh", { guildId, seedId });
+    return;
+  }
+  enqueue(guildId, pick);
+  log.info("autoplay: queued recommendation", {
+    guildId,
+    seedId,
+    label: pick.label,
+  });
 }
 
 async function processGuild(
@@ -54,6 +144,10 @@ async function processGuild(
       await nowPlaying.teardown(guildId, botRpc).catch(() => {});
       return;
     }
+    // Autoplay: top the queue up with a YouTube recommendation before we
+    // decide what (if anything) to play next, so a just-ended track is
+    // replaced seamlessly and an idle session keeps going.
+    await maybeAutoplayRefill(guildId, log);
     if (!status.playing) {
       const next = advance(guildId);
       if (next) {
