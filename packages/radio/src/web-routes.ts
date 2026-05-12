@@ -120,8 +120,7 @@ function publicTrack(t: Track): Record<string, unknown> {
   // else a direct http(s) media / station URL — but never the internal
   // `/internal/audio/…` path a downloaded library file is streamed from.
   const sourceUrl =
-    t.originUrl ??
-    (!t.trackId && /^https?:\/\//i.test(t.url) ? t.url : undefined);
+    t.originUrl ?? (!t.trackId && isHttpUrl(t.url) ? t.url : undefined);
   return {
     label: t.label,
     queuedBy: t.queuedBy,

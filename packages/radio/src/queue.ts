@@ -45,11 +45,13 @@ export interface Track {
   /** Cover image URL (library metadata), for the WebUI now-playing card. */
   coverUrl?: string;
   /**
-   * The original *page* URL this track was sourced from — a YouTube
-   * watch URL — kept even after the link has been resolved to a
-   * (signed, opaque) CDN stream URL. Used as the seed for autoplay
-   * recommendations (see advance-loop.ts). Absent for stations, direct
-   * media URLs, and library tracks not sourced from YouTube.
+   * The original *page* URL this track was sourced from — a YouTube /
+   * SoundCloud / Bandcamp / … page, or a library track's download URL —
+   * kept even after the link has been resolved to a (signed, opaque) CDN
+   * stream URL. Seeds autoplay recommendations when it's a YouTube watch
+   * URL (see advance-loop.ts) and is what the WebUI links a track title
+   * to. Absent for stations and direct media URLs (their `url` already
+   * *is* the source).
    */
   originUrl?: string;
   /**
