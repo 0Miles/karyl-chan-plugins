@@ -42,8 +42,10 @@ jobs:
             VERSION="${REF#refs/tags/radio-v}"
             echo "tags=$IMG:$VERSION,$IMG:latest" >> "$GITHUB_OUTPUT"
           else
-            # push to main / manual dispatch → :edge
-            echo "tags=$IMG:edge" >> "$GITHUB_OUTPUT"
+            # push to main / manual dispatch → :edge AND :latest
+            # (:latest mirrors the bot's docker-publish.yml convention so a
+            #  watchtower-pinned prod deployment auto-updates from main).
+            echo "tags=$IMG:edge,$IMG:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build & push

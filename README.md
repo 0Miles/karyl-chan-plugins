@@ -30,7 +30,7 @@ pnpm docker:down
 | `@karyl-chan/plugin-sdk` | git tag `sdk-v<semver>`  | `npm.pkg.github.com`（GitHub Packages npm）|
 | `@karyl-chan/plugin-sdk` `@edge` | 每次 push 到 `main` | `npm.pkg.github.com`                       |
 | radio docker image       | git tag `radio-v<semver>`| `ghcr.io/<owner>/karyl-radio-plugin:<tag>` + `:latest` |
-| radio docker `:edge`     | 每次 push 到 `main`      | `ghcr.io/<owner>/karyl-radio-plugin:edge`  |
+| radio docker `:edge` + `:latest` | 每次 push 到 `main` | `ghcr.io/<owner>/karyl-radio-plugin:edge` + `:latest` |
 
 `@karyl-chan/plugin-sdk` 在這個 monorepo 內部透過 `workspace:*` 引用，所以外
 掛永遠對著 in-tree 的 SDK 編譯。外部使用者從 GitHub Packages 安裝它，`.npmrc`
