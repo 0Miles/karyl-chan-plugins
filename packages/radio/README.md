@@ -15,20 +15,38 @@ and the advance loop, so it keeps its own package and docker service.
 | `download <url>` | Download audio from a URL (YouTube, SoundCloud, direct media…) into the library |
 | `skip` / `back` | Skip to next / go back to the previous track |
 | `loop <off\|track\|queue>` | Set the loop mode |
+| `autoplay <on\|off>` | Auto-queue YouTube recommendations when the queue runs out (see below) |
 | `stop` | Stop, clear the queue, leave voice |
 | `np` / `queuelist` | Now-playing card (the embed + control buttons below; ephemeral, not auto-updated) / show the queue |
 | `stations` | List the built-in radio stations |
 | `manage` | Get a private link to the admin WebUI (requires the `plugin:karyl-radio:webui.access` capability — bot owners/admins exempt) |
 
 `source` for `play`/`queue` auto-resolves a station key, a library track
-title/ID, an http(s) media URL, or a YouTube URL.
+title/ID, an http(s) media URL, or a YouTube URL. A YouTube link carrying
+a `list=` param given to `/radio play` (a Mix/radio share like
+`watch?v=…&list=RD…`, or a `/playlist?list=…`) also switches **autoplay
+on** for the guild; any other `play` source switches it off.
+
+## Autoplay
+
+With autoplay on, the advance loop keeps the queue topped up: whenever the
+queue is empty (and loop is `off`) it pulls the YouTube "Mix" radio seeded
+from the most recent YouTube track this session and appends the first
+recommendation not already played/queued. It refills proactively while a
+track is still playing, so the next song is lined up before the current
+one ends; if it's seeded from a non-YouTube track it falls back to the
+last YouTube track in the session play-log. It gives up gracefully (the
+session ends as usual) if the mix has nothing fresh. Off by default;
+toggle it with `/radio autoplay`, the ♾️ button on the now-playing
+message, or the session WebUI.
 
 ## Now-playing message
 
 While a guild has an active playback session the plugin keeps **one
 public embed in the bot's voice-channel text chat** — current track,
-queue size, loop/pause state — with control buttons (⏮ prev · ⏯
-play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle) plus a "🎛 WebUI" link.
+queue size, loop/pause/autoplay state — with control buttons (⏮ prev · ⏯
+play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle · ♾️ autoplay-toggle) plus a
+"🎛 WebUI" link.
 It's edited in place on every state change (a `/radio` command, a WebUI
 action, or the auto-advance loop moving to the next track) and deleted
 when the session ends (the bot leaves voice, `/radio stop`, or the queue
