@@ -56,8 +56,10 @@ play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle · ♾️ autoplay-toggle)
 "🎛 WebUI" link.
 It's edited in place on every state change (a `/radio` command, a WebUI
 action, or the auto-advance loop moving to the next track) and deleted
-when the session ends (the bot leaves voice, `/radio stop`, or the queue
-runs dry). Edits are change-gated, so a steady radio stream causes none.
+when the session ends (the bot leaves voice, `/radio stop`, the queue
+runs dry, or the voice channel has been empty of human listeners for a
+minute — the bot then stops and leaves on its own). Edits are
+change-gated, so a steady radio stream causes none.
 
 Only members **currently in the bot's voice channel** can use the control
 buttons (others get an ephemeral nudge); the WebUI link button stays valid

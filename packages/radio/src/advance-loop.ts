@@ -14,6 +14,7 @@ import {
   resolveAutoplayRecommendations,
   youtubeVideoIdOf,
 } from "./resolver.js";
+import { doStop } from "./playback-actions.js";
 import * as nowPlaying from "./now-playing.js";
 
 type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
@@ -23,6 +24,13 @@ type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
 // inFlight guard below means a tick that runs long (a yt-dlp resolve)
 // just makes the next ticks skip that guild rather than pile up.
 const ADVANCE_INTERVAL_MS = 1_000;
+
+// End a session if the bot's voice channel has had no human listeners for
+// this long. `lastListenerAt` maps guild → the last tick at which we saw
+// ≥1 listener (or couldn't tell — we conservatively treat "unknown" as
+// "someone's there" so a transient hiccup never auto-stops).
+const EMPTY_CHANNEL_STOP_MS = 60_000;
+const lastListenerAt = new Map<string, number>();
 
 // Guilds currently being processed. A tick can do a yt-dlp stream
 // resolution for lazy (playlist / autoplay) tracks, which takes longer
@@ -164,6 +172,7 @@ async function processGuild(
       playing?: boolean;
       channelId?: string | null;
       paused?: boolean;
+      listeners?: number;
     } | null;
     if (!status) return; // RPC blip — retry next tick (state unknown; leave the message alone).
     if (!status.connected) {
@@ -173,8 +182,31 @@ async function processGuild(
       // play` resumes into it.
       seenGuilds.delete(guildId);
       prefetched.delete(guildId);
+      lastListenerAt.delete(guildId);
       await nowPlaying.teardown(guildId, botRpc).catch(() => {});
       return;
+    }
+    // Auto-end the session once the bot's voice channel has been empty of
+    // human listeners for EMPTY_CHANNEL_STOP_MS. `listeners` undefined =
+    // "can't tell" → treat as occupied (reset the clock).
+    const now = Date.now();
+    if (status.listeners === 0) {
+      const since = lastListenerAt.get(guildId);
+      if (since !== undefined && now - since > EMPTY_CHANNEL_STOP_MS) {
+        log.info(
+          "advance: voice channel empty for >1min — stopping session",
+          { guildId },
+        );
+        seenGuilds.delete(guildId);
+        prefetched.delete(guildId);
+        lastListenerAt.delete(guildId);
+        await doStop(guildId, botRpc).catch(() => {});
+        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+        return;
+      }
+      if (since === undefined) lastListenerAt.set(guildId, now);
+    } else {
+      lastListenerAt.set(guildId, now);
     }
     // Autoplay: top the queue up with a YouTube recommendation before we
     // decide what (if anything) to play next, so a just-ended track is
