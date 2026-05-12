@@ -15,8 +15,15 @@ import type {
   BehaviorDefinition,
   CommandDefinition,
   PluginCommandDefinition,
+  PluginComponentDefinition,
 } from "./plugin.js";
-import type { BehaviorContext, CommandContext, CommandReply } from "./types.js";
+import type {
+  BehaviorContext,
+  CommandContext,
+  CommandReply,
+  ComponentContext,
+  ComponentReply,
+} from "./types.js";
 
 export interface PluginServerOptions {
   pluginKey: string;
@@ -31,6 +38,8 @@ export interface PluginServerOptions {
    * v2：behaviors（軌二 webhook 接口層）。
    */
   behaviors?: BehaviorDefinition[];
+  /** v2：plugin 元件（按鈕）handler。掛在 `/components`。 */
+  components?: PluginComponentDefinition[];
   /**
    * @deprecated v1 commands。請改用 pluginCommands。
    * 保留以不破壞既有 v1 plugin server build；M1-E 升級後移除。
@@ -51,6 +60,21 @@ interface InteractionPayload {
   user: { id: string; username?: string; global_name?: string | null };
   /** Bot-resolved subset of the invoker's RBAC tokens: `admin` + this plugin's `plugin:<key>:*`. */
   member?: { capabilities?: string[] };
+}
+
+/** Body the bot POSTs to `/components` on a button click. */
+interface ComponentPayload {
+  interaction_id: string;
+  interaction_token: string;
+  custom_id: string;
+  guild_id: string | null;
+  channel_id: string | null;
+  message_id: string;
+  user: { id: string; username?: string; global_name?: string | null };
+  member?: {
+    voice_channel_id?: string | null;
+    capabilities?: string[];
+  } | null;
 }
 
 function verifyDispatchAuth(
@@ -213,6 +237,11 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
     (opts.behaviors ?? []).map((b) => [b.key, b.handler]),
   );
 
+  // v2 component map：componentId → handler
+  const componentMap = new Map<string, PluginComponentDefinition["handler"]>(
+    (opts.components ?? []).map((c) => [c.id, c.handler]),
+  );
+
   const server = Fastify({ logger: true });
   server.addContentTypeParser(
     "application/json",
@@ -324,6 +353,133 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
           false,
           undefined,
         );
+      }
+    },
+  );
+
+  // ── plugin 元件（按鈕）dispatch（HMAC 驗證）─────────────────────────────
+  // custom_id = `kc:<thisPluginKey>:<componentId>[:<tail>]`。bot 先
+  // deferUpdate() ack 點擊（不改訊息），再 POST 過來；handler 回傳
+  // { content?, embeds?, components? } 就用 interactions.respond
+  // PATCH 按鈕所在的那則訊息（@original），回傳空 / null 則維持訊息原狀。
+  server.post(
+    "/components",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const signingKey = opts.getDispatchHmacKey?.() ?? null;
+      if (!signingKey) {
+        return reply.code(503).send({
+          error: "dispatch HMAC key not available; plugin must re-register",
+        });
+      }
+      const rawBody = typeof request.body === "string" ? request.body : "";
+      const auth = verifyDispatchAuth(request, rawBody, signingKey);
+      if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+
+      let payload: ComponentPayload;
+      try {
+        payload = JSON.parse(rawBody) as ComponentPayload;
+      } catch {
+        return reply.code(400).send({ error: "invalid JSON" });
+      }
+      if (!payload.user || typeof payload.user.id !== "string") {
+        return reply.code(400).send({ error: "missing user.id" });
+      }
+      if (
+        typeof payload.custom_id !== "string" ||
+        typeof payload.message_id !== "string"
+      ) {
+        return reply.code(400).send({ error: "missing custom_id / message_id" });
+      }
+
+      const token = opts.getToken();
+      if (!token) return reply.code(200).send({ ok: true });
+      reply.code(204).send();
+
+      const prefix = `kc:${opts.pluginKey}:`;
+      if (!payload.custom_id.startsWith(prefix)) {
+        server.log.warn(
+          { customId: payload.custom_id },
+          "component custom_id doesn't match this plugin",
+        );
+        return;
+      }
+      const after = payload.custom_id.slice(prefix.length);
+      const sep = after.indexOf(":");
+      const componentId = sep === -1 ? after : after.slice(0, sep);
+      const tail = sep === -1 ? "" : after.slice(sep + 1);
+
+      const followup = (content: string): Promise<unknown | null> =>
+        callBotRpc(
+          server.log,
+          opts.botUrl,
+          token,
+          "/api/plugin/interactions.followup",
+          {
+            interaction_token: payload.interaction_token,
+            content,
+            ephemeral: true,
+          },
+        );
+
+      const handler = componentMap.get(componentId);
+      if (!handler) {
+        await followup(`⚠ Unknown component \`${componentId}\``);
+        return;
+      }
+
+      const capabilities = Array.isArray(payload.member?.capabilities)
+        ? payload.member!.capabilities!.filter(
+            (c): c is string => typeof c === "string",
+          )
+        : [];
+      const ctx: ComponentContext = {
+        pluginKey: opts.pluginKey,
+        customId: payload.custom_id,
+        componentId,
+        tail,
+        guildId: payload.guild_id,
+        channelId: payload.channel_id,
+        messageId: payload.message_id,
+        userId: payload.user.id,
+        userDisplayName:
+          payload.user.global_name || payload.user.username || payload.user.id,
+        voiceChannelId: payload.member?.voice_channel_id ?? null,
+        capabilities,
+        hasCapability: (capKey: string): boolean =>
+          capabilities.includes("admin") ||
+          capabilities.includes(`plugin:${opts.pluginKey}:${capKey}`),
+        publicBaseUrl: opts.getPublicBaseUrl?.(),
+        log: {
+          info: (msg, meta) => server.log.info(meta ?? {}, msg),
+          warn: (msg, meta) => server.log.warn(meta ?? {}, msg),
+          error: (msg, meta) => server.log.error(meta ?? {}, msg),
+        },
+        botRpc: (path: string, body?: unknown) =>
+          callBotRpc(server.log, opts.botUrl, token, path, body),
+      };
+
+      try {
+        const rawReply = await handler(ctx);
+        if (
+          rawReply &&
+          (rawReply.content !== undefined ||
+            rawReply.embeds !== undefined ||
+            rawReply.components !== undefined)
+        ) {
+          await respondToInteraction(
+            server.log,
+            opts.botUrl,
+            token,
+            payload.interaction_token,
+            rawReply.content,
+            false,
+            rawReply.embeds,
+            rawReply.components,
+          );
+        }
+      } catch (err) {
+        server.log.error({ err }, "component handler threw");
+        await followup("⚠ Internal error while handling the button");
       }
     },
   );

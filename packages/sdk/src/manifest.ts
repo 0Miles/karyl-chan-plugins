@@ -293,6 +293,8 @@ export interface PluginManifestV2 {
     events?: string;
     /** 取代 v1 的 endpoints.command。 */
     plugin_command?: string;
+    /** plugin 元件（按鈕）互動派送端點；只有宣告 components 時才出現，預設 `/components`。 */
+    plugin_component?: string;
     guild_feature_action?: string;
     // 注意：behaviors 不走 endpoints，每條 behavior 自帶 webhook_path
     // 注意：v1 endpoints.dm_behavior_dispatch 在 v2 廢棄

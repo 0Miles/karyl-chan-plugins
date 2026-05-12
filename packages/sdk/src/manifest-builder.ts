@@ -156,6 +156,9 @@ export function buildManifestV2(
     ...(capabilities.length > 0 ? { capabilities } : {}),
     endpoints: {
       plugin_command: "/commands/{command_name}",
+      ...((cfg.components ?? []).length > 0
+        ? { plugin_component: "/components" }
+        : {}),
     },
   };
 

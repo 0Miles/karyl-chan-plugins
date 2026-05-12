@@ -5,6 +5,8 @@ export {
   defineBehavior,
   defineGuildFeature,
   definePluginCapability,
+  definePluginComponent,
+  componentCustomId,
 } from "./plugin.js";
 export type {
   PluginConfigV2,
@@ -12,6 +14,7 @@ export type {
   BehaviorDefinition,
   GuildFeatureDefinition,
   PluginCapabilityDefinition,
+  PluginComponentDefinition,
   PluginInstance,
   StartedPlugin,
   StartOptions,
@@ -36,6 +39,8 @@ export type {
   WebhookPayload,
   BehaviorContext,
   BehaviorReply,
+  ComponentContext,
+  ComponentReply,
 } from "./types.js";
 
 export { verifyWebhookToken } from "./webhook-token.js";

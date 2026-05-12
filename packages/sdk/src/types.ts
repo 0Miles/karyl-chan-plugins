@@ -169,3 +169,80 @@ export interface BehaviorContext {
  * - 若不需回應（fire-and-forget）：回傳 null 或 undefined。
  */
 export type BehaviorReply = WebhookPayload | string | null | undefined;
+
+// ── Component（按鈕）互動 ────────────────────────────────────────────────────
+
+/**
+ * Context passed to a plugin *component* (button) handler.
+ *
+ * A button "owned" by a plugin has a `custom_id` of the form
+ * `kc:<pluginKey>:<componentId>[:<tail>]` (`kc` = "karyl plugin
+ * component"). On a click the bot resolves the plugin, `deferUpdate`s
+ * the interaction (acks without changing the message), and POSTs the
+ * click here. Because component interactions create a *fresh*
+ * interaction (and a fresh 15-minute token) on every click, the handler
+ * isn't bound by the original message's age — it can keep editing that
+ * message for as long as it exists.
+ */
+export interface ComponentContext {
+  /** Plugin key (= manifest.plugin.id). */
+  pluginKey: string;
+  /** Full Discord custom_id, e.g. `kc:karyl-radio:next` or `kc:karyl-radio:replay:42`. */
+  customId: string;
+  /** The component id — the segment after `kc:<pluginKey>:`, before any `:tail`. */
+  componentId: string;
+  /** Everything after `kc:<pluginKey>:<componentId>:`, or `""` for ids that carry no args. */
+  tail: string;
+  /** Guild the button was clicked in; null for DM contexts. */
+  guildId: string | null;
+  /** Channel the button's message lives in; null if Discord didn't supply it. */
+  channelId: string | null;
+  /** Id of the message the button is attached to. */
+  messageId: string;
+  /** Discord user id of whoever clicked. */
+  userId: string;
+  /** Display name of the clicker — global display name → username → id. */
+  userDisplayName: string;
+  /**
+   * The clicker's current voice-channel id in this guild, or null when
+   * they aren't in voice (or this isn't a guild). Lets a plugin gate
+   * controls on "you must be in the bot's voice channel".
+   */
+  voiceChannelId: string | null;
+  /**
+   * The clicker's plugin-relevant RBAC capabilities for THIS click, as
+   * the bot resolved them: `admin` (if held) plus this plugin's own
+   * `plugin:<pluginKey>:*` grants. Prefer `hasCapability()`.
+   */
+  capabilities: string[];
+  /** True if the clicker holds `plugin:<this plugin's key>:<capKey>`, or `admin`. */
+  hasCapability(capKey: string): boolean;
+  /** Logger from the underlying Fastify instance. */
+  log: Logger;
+  /** Browser-reachable base URL for this plugin's HTTP surface, if the bot exposes one. */
+  publicBaseUrl?: string;
+  /**
+   * Call a bot-side plugin RPC. The interaction was already `deferUpdate`d
+   * by the bot, so use `/api/plugin/interactions.respond` to edit the
+   * message the button is on (it PATCHes `@original`) — though returning a
+   * `{ content?, embeds?, components? }` from the handler does that for
+   * you — or `/api/plugin/interactions.followup` with `{ ephemeral: true }`
+   * for a nudge that doesn't touch the message.
+   */
+  botRpc(path: string, body?: unknown): Promise<unknown | null>;
+}
+
+/**
+ * What a component handler may return:
+ *  - nothing / null / undefined → leave the message as-is (the bot has
+ *    already acked the click with `deferUpdate`)
+ *  - `{ content?, embeds?, components? }` → edit the message the button
+ *    is on with these fields (forwarded to `interactions.respond`;
+ *    omitted fields are left unchanged, `components: []` clears buttons).
+ * For an ephemeral reply that doesn't touch the message use
+ * `ctx.botRpc("/api/plugin/interactions.followup", { ephemeral: true, content })`.
+ */
+export type ComponentReply =
+  | void
+  | null
+  | { content?: string; embeds?: unknown[]; components?: unknown[] };

@@ -5,6 +5,8 @@ import type {
   CommandContext,
   CommandOption,
   CommandReply,
+  ComponentContext,
+  ComponentReply,
   InteractionContext,
 } from "./types.js";
 import type { ManifestConfigField } from "./manifest.js";
@@ -160,6 +162,26 @@ export interface BehaviorDefinition {
 }
 
 /**
+ * Plugin 元件（按鈕）handler 定義。
+ *
+ * Plugin 在它送出的訊息上掛 Discord v1 按鈕，`custom_id` 形如
+ * `kc:<pluginKey>:<id>`（可再帶 `:<tail>` 夾參數）—— 用
+ * `componentCustomId()` 建。使用者點擊時 bot 先 `deferUpdate()` ack，
+ * 再把點擊 POST 到此 plugin 的 `/components` 端點；對應 `id` 的 handler
+ * 被呼叫。component interaction 每次點擊都是全新的 interaction（含新的
+ * 15 分鐘 token），所以按鈕在訊息存在期間一直有效。
+ */
+export interface PluginComponentDefinition {
+  /**
+   * 元件 id（plugin 內唯一），格式 [a-z0-9][a-z0-9._-]*。會被嵌進
+   * `custom_id` —— `kc:` + pluginKey + `:` + id（+ 可選 `:tail`）必須
+   * ≤ 100 字（Discord 上限），所以 id + tail 加起來別太長。
+   */
+  id: string;
+  handler: (ctx: ComponentContext) => ComponentReply | Promise<ComponentReply>;
+}
+
+/**
  * Plugin 自身需要的 RBAC capability 宣告。
  *
  * Plugin 在 manifest 宣告它需要哪些自訂權限詞條（例如 WebUI 存取、
@@ -232,6 +254,13 @@ export interface PluginConfigV2 {
   guildFeatures?: GuildFeatureDefinition[];
 
   /**
+   * Plugin 元件（按鈕）handler。宣告任一條時，manifest 會帶
+   * `endpoints.plugin_component = "/components"`，SDK 掛上對應路由，bot
+   * 才會把 `kc:<thisKey>:…` 的按鈕點擊派送過來。
+   */
+  components?: PluginComponentDefinition[];
+
+  /**
    * 此 plugin 需要的 RBAC capability 詞條。bot 端在 register 時持久化，
    * 並在 admin「身分組權限」modal 開專屬分頁；plugin 移除時一併清除。
    */
@@ -283,6 +312,48 @@ export function definePluginCommand(
  */
 export function defineBehavior(def: BehaviorDefinition): BehaviorDefinition {
   return def;
+}
+
+/** 元件 id 格式（plugin 內唯一）：[a-z0-9][a-z0-9._-]* */
+const COMPONENT_ID_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * 定義一個 plugin 元件（按鈕）handler。回傳定義物件不變（類型化建構子）。
+ * `id` 格式在 build 時就驗，避免等 bot dispatch 才出錯。
+ */
+export function definePluginComponent(
+  def: PluginComponentDefinition,
+): PluginComponentDefinition {
+  if (typeof def.id !== "string" || !COMPONENT_ID_RE.test(def.id)) {
+    throw new Error(
+      `definePluginComponent: id "${String(def.id)}" must match [a-z0-9][a-z0-9._-]*`,
+    );
+  }
+  if (typeof def.handler !== "function") {
+    throw new Error(`definePluginComponent: '${def.id}'.handler must be a function`);
+  }
+  return def;
+}
+
+/**
+ * Build the Discord `custom_id` for one of this plugin's button
+ * components: `kc:<pluginKey>:<id>` (+ `:<tail>` when args are passed).
+ * The result must be ≤ 100 chars (Discord's limit) — keep ids short and
+ * tails small. The matching `definePluginComponent({ id })` handler is
+ * invoked when the button is clicked.
+ */
+export function componentCustomId(
+  pluginKey: string,
+  id: string,
+  tail?: string,
+): string {
+  const cid = `kc:${pluginKey}:${id}${tail !== undefined && tail !== "" ? `:${tail}` : ""}`;
+  if (cid.length > 100) {
+    throw new Error(
+      `componentCustomId: "${cid}" exceeds Discord's 100-char custom_id limit`,
+    );
+  }
+  return cid;
 }
 
 /**
@@ -371,6 +442,13 @@ export function definePlugin(
       }
       seen.add(cmd.name);
     }
+    const seenComponents = new Set<string>();
+    for (const c of config.components ?? []) {
+      if (seenComponents.has(c.id)) {
+        throw new Error(`definePlugin: duplicate component id "${c.id}"`);
+      }
+      seenComponents.add(c.id);
+    }
   }
   return {
     config,
@@ -412,6 +490,7 @@ export function definePlugin(
             ...(config.guildFeatures ?? []).flatMap((f) => f.commands ?? []),
           ],
           behaviors: config.behaviors ?? [],
+          components: config.components ?? [],
           getToken: () => client?.token() ?? null,
           getDispatchHmacKey: () => client?.getDispatchHmacKey() ?? null,
           getPublicBaseUrl: () => client?.getPublicBaseUrl(),
