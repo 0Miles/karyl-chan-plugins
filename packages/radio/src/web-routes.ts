@@ -40,6 +40,7 @@ import {
   setLoop,
 } from "./queue.js";
 import { doNext, doPrev } from "./playback-actions.js";
+import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import {
   isYouTubePlaylistUrl,
@@ -478,11 +479,13 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
-      if (!_botRpc)
-        return reply.code(503).send({ error: "bot RPC unavailable" });
-      await doNext(guildId, _botRpc);
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        if (!_botRpc)
+          return reply.code(503).send({ error: "bot RPC unavailable" });
+        await doNext(guildId, _botRpc);
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -491,13 +494,15 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
-      if (!_botRpc)
-        return reply.code(503).send({ error: "bot RPC unavailable" });
-      const r = await doPrev(guildId, _botRpc);
-      if (r.kind === "no-history")
-        return reply.code(409).send({ error: "Nothing to go back to" });
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        if (!_botRpc)
+          return reply.code(503).send({ error: "bot RPC unavailable" });
+        const r = await doPrev(guildId, _botRpc);
+        if (r.kind === "no-history")
+          return reply.code(409).send({ error: "Nothing to go back to" });
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -506,7 +511,6 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
       let body: { mode?: string };
       try {
         body =
@@ -520,8 +524,11 @@ export async function registerWebRoutes(
       if (!mode || !LOOP_MODES.includes(mode as LoopMode)) {
         return reply.code(400).send({ error: "mode must be off/track/queue" });
       }
-      setLoop(guildId, mode as LoopMode);
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        setLoop(guildId, mode as LoopMode);
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -530,7 +537,6 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
       let body: { on?: unknown };
       try {
         body =
@@ -543,8 +549,12 @@ export async function registerWebRoutes(
       if (typeof body?.on !== "boolean") {
         return reply.code(400).send({ error: "`on` (boolean) required" });
       }
-      setAutoplay(guildId, body.on);
-      return syncAndSnapshot(guildId);
+      const on = body.on;
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        setAutoplay(guildId, on);
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -554,7 +564,6 @@ export async function registerWebRoutes(
       const { guildId } = request.params;
       const claims = authSession(request, reply, guildId);
       if (!claims) return;
-      keepAdvancing(guildId);
       let body: { source?: string };
       try {
         body =
@@ -568,36 +577,41 @@ export async function registerWebRoutes(
       // queuedBy=null: the session token's userId is "who started the
       // session" (whoever last minted the cached token), not necessarily
       // whoever is clicking the WebUI now — don't misattribute.
+      // Resolve outside the lock (it's a read, and can take seconds); only
+      // the enqueue + sync below run under it.
+      let toQueue: Track[];
       if (isYouTubePlaylistUrl(source)) {
-        let tracks: Track[];
         try {
-          tracks = await resolvePlaylist(source, null);
+          toQueue = await resolvePlaylist(source, null);
         } catch (err) {
           return reply.code(400).send({
             error: `Couldn't expand that playlist: ${err instanceof Error ? err.message.slice(0, 200) : "error"}`,
           });
         }
-        if (tracks.length === 0) {
+        if (toQueue.length === 0) {
           return reply
             .code(400)
             .send({ error: "Playlist is empty or unavailable" });
         }
-        for (const t of tracks) enqueue(guildId, t);
+      } else {
+        let track: Track | null;
+        try {
+          track = await resolveAnyTrack(source, null);
+        } catch (err) {
+          return reply.code(400).send({
+            error: `Couldn't resolve that source: ${err instanceof Error ? err.message.slice(0, 200) : "error"}`,
+          });
+        }
+        if (!track) {
+          return reply.code(400).send({ error: "Unknown station/track/URL" });
+        }
+        toQueue = [track];
+      }
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        for (const t of toQueue) enqueue(guildId, t);
         return syncAndSnapshot(guildId);
-      }
-      let track: Track | null;
-      try {
-        track = await resolveAnyTrack(source, null);
-      } catch (err) {
-        return reply.code(400).send({
-          error: `Couldn't resolve that source: ${err instanceof Error ? err.message.slice(0, 200) : "error"}`,
-        });
-      }
-      if (!track) {
-        return reply.code(400).send({ error: "Unknown station/track/URL" });
-      }
-      enqueue(guildId, track);
-      return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -606,12 +620,14 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
       const idx = Number(request.params.index);
-      const removed = dequeueAt(guildId, idx);
-      if (!removed)
-        return reply.code(404).send({ error: "No such queue item" });
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        const removed = dequeueAt(guildId, idx);
+        if (!removed)
+          return reply.code(404).send({ error: "No such queue item" });
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -620,8 +636,10 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      clearQueue(guildId);
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        clearQueue(guildId);
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -632,18 +650,20 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
       const seq = Number(request.params.seq);
-      const entry = Number.isInteger(seq)
-        ? getState(guildId)?.playLog.find((e) => e.seq === seq)
-        : undefined;
-      if (!entry) {
-        return reply
-          .code(404)
-          .send({ error: "No such played track (refresh and retry)" });
-      }
-      enqueue(guildId, { ...entry.track });
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        const entry = Number.isInteger(seq)
+          ? getState(guildId)?.playLog.find((e) => e.seq === seq)
+          : undefined;
+        if (!entry) {
+          return reply
+            .code(404)
+            .send({ error: "No such played track (refresh and retry)" });
+        }
+        enqueue(guildId, { ...entry.track });
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 
@@ -653,11 +673,13 @@ export async function registerWebRoutes(
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      keepAdvancing(guildId);
-      for (const e of getState(guildId)?.playLog ?? []) {
-        enqueue(guildId, { ...e.track });
-      }
-      return syncAndSnapshot(guildId);
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        for (const e of getState(guildId)?.playLog ?? []) {
+          enqueue(guildId, { ...e.track });
+        }
+        return syncAndSnapshot(guildId);
+      });
     },
   );
 

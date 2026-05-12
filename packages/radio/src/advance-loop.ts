@@ -15,6 +15,7 @@ import {
   youtubeVideoIdOf,
 } from "./resolver.js";
 import { doStop } from "./playback-actions.js";
+import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 
 type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
@@ -159,112 +160,120 @@ async function processGuild(
   if (inFlight.has(guildId)) return;
   inFlight.add(guildId);
   try {
-    // Idle / no state — the session is over (kept GuildState survives a
-    // dry queue for the WebUI play-log, but the public now-playing
-    // message goes away and we stop ticking).
-    if (isIdle(guildId)) {
-      seenGuilds.delete(guildId);
-      prefetched.delete(guildId);
-      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-      return;
-    }
-    const status = (await botRpc("/api/plugin/voice.status", {
-      guild_id: guildId,
-    })) as {
-      connected?: boolean;
-      playing?: boolean;
-      channelId?: string | null;
-      paused?: boolean;
-      listeners?: number;
-    } | null;
-    if (!status) return; // RPC blip — retry next tick (state unknown; leave the message alone).
-    if (!status.connected) {
-      // Bot is no longer in the channel and this loop has no way to
-      // re-join (that needs a user to follow). Stop ticking, drop the
-      // now-playing message — keep the queue state so a fresh `/radio
-      // play` resumes into it.
-      seenGuilds.delete(guildId);
-      prefetched.delete(guildId);
-      lastListenerAt.delete(guildId);
-      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-      return;
-    }
-    // Auto-end the session once the bot's voice channel has been empty of
-    // human listeners for EMPTY_CHANNEL_STOP_MS. `listeners` undefined =
-    // "can't tell" → treat as occupied (reset the clock).
-    const now = Date.now();
-    if (status.listeners === 0) {
-      const since = lastListenerAt.get(guildId);
-      if (since !== undefined && now - since > EMPTY_CHANNEL_STOP_MS) {
-        log.info(
-          "advance: voice channel empty for >1min — stopping session",
-          { guildId },
-        );
+    // Serialize against `/radio` commands, the now-playing buttons and the
+    // WebUI session routes — they all mutate this guild's queue/current
+    // state across awaits, so a tick that interleaved with one of them
+    // could leave the queue inconsistent (see guild-lock.ts). `inFlight`
+    // above still makes a tick that arrives while this one is in progress
+    // (including while it's *waiting* for the lock) skip rather than queue.
+    await withGuildLock(guildId, async () => {
+      // Idle / no state — the session is over (kept GuildState survives a
+      // dry queue for the WebUI play-log, but the public now-playing
+      // message goes away and we stop ticking).
+      if (isIdle(guildId)) {
         seenGuilds.delete(guildId);
         prefetched.delete(guildId);
-        lastListenerAt.delete(guildId);
-        await doStop(guildId, botRpc).catch(() => {});
         await nowPlaying.teardown(guildId, botRpc).catch(() => {});
         return;
       }
-      if (since === undefined) lastListenerAt.set(guildId, now);
-    } else {
-      lastListenerAt.set(guildId, now);
-    }
-    // Autoplay: top the queue up with a YouTube recommendation before we
-    // decide what (if anything) to play next, so a just-ended track is
-    // replaced seamlessly and an idle session keeps going.
-    await maybeAutoplayRefill(guildId, log);
-    if (!status.playing) {
-      const next = advance(guildId);
-      if (next) {
-        // If we pre-resolved this exact entry while the last track was
-        // playing, use that — no fresh yt-dlp call between songs.
-        const pf = prefetched.get(guildId);
+      const status = (await botRpc("/api/plugin/voice.status", {
+        guild_id: guildId,
+      })) as {
+        connected?: boolean;
+        playing?: boolean;
+        channelId?: string | null;
+        paused?: boolean;
+        listeners?: number;
+      } | null;
+      if (!status) return; // RPC blip — retry next tick (state unknown; leave the message alone).
+      if (!status.connected) {
+        // Bot is no longer in the channel and this loop has no way to
+        // re-join (that needs a user to follow). Stop ticking, drop the
+        // now-playing message — keep the queue state so a fresh `/radio
+        // play` resumes into it.
+        seenGuilds.delete(guildId);
         prefetched.delete(guildId);
-        const hint =
-          next.needsResolve && pf && pf.url === next.url
-            ? { resolved: await pf.promise }
-            : undefined;
-        const outcome = await playTrack(
-          next,
-          (url) =>
-            botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
-          hint,
-        );
-        if (outcome.ok) {
-          setCurrent(guildId, outcome.track);
-        } else if (outcome.reason === "play-failed") {
-          // Transient — re-queue the ORIGINAL (lazy) entry so the next
-          // attempt re-resolves with a fresh URL.
-          requeueFront(guildId, next);
-          log.warn("advance: voice.play failed, re-queued for retry", {
-            guildId,
-            url: next.url,
-          });
-        } else {
-          // Deleted / private / region-blocked playlist item — drop it
-          // (advance already removed it); next tick continues.
-          log.warn("advance: dropping unplayable track", {
-            guildId,
-            url: next.url,
-          });
+        lastListenerAt.delete(guildId);
+        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+        return;
+      }
+      // Auto-end the session once the bot's voice channel has been empty
+      // of human listeners for EMPTY_CHANNEL_STOP_MS. `listeners`
+      // undefined = "can't tell" → treat as occupied (reset the clock).
+      const now = Date.now();
+      if (status.listeners === 0) {
+        const since = lastListenerAt.get(guildId);
+        if (since !== undefined && now - since > EMPTY_CHANNEL_STOP_MS) {
+          log.info(
+            "advance: voice channel empty for >1min — stopping session",
+            { guildId },
+          );
+          seenGuilds.delete(guildId);
+          prefetched.delete(guildId);
+          lastListenerAt.delete(guildId);
+          await doStop(guildId, botRpc).catch(() => {});
+          await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+          return;
+        }
+        if (since === undefined) lastListenerAt.set(guildId, now);
+      } else {
+        lastListenerAt.set(guildId, now);
+      }
+      // Autoplay: top the queue up with a YouTube recommendation before we
+      // decide what (if anything) to play next, so a just-ended track is
+      // replaced seamlessly and an idle session keeps going.
+      await maybeAutoplayRefill(guildId, log);
+      if (!status.playing) {
+        const next = advance(guildId);
+        if (next) {
+          // If we pre-resolved this exact entry while the last track was
+          // playing, use that — no fresh yt-dlp call between songs.
+          const pf = prefetched.get(guildId);
+          prefetched.delete(guildId);
+          const hint =
+            next.needsResolve && pf && pf.url === next.url
+              ? { resolved: await pf.promise }
+              : undefined;
+          const outcome = await playTrack(
+            next,
+            (url) =>
+              botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
+            hint,
+          );
+          if (outcome.ok) {
+            setCurrent(guildId, outcome.track);
+          } else if (outcome.reason === "play-failed") {
+            // Transient — re-queue the ORIGINAL (lazy) entry so the next
+            // attempt re-resolves with a fresh URL.
+            requeueFront(guildId, next);
+            log.warn("advance: voice.play failed, re-queued for retry", {
+              guildId,
+              url: next.url,
+            });
+          } else {
+            // Deleted / private / region-blocked playlist item — drop it
+            // (advance already removed it); next tick continues.
+            log.warn("advance: dropping unplayable track", {
+              guildId,
+              url: next.url,
+            });
+          }
         }
       }
-    }
-    // The advance above may have drained the queue — if so, the session
-    // is done: tear down rather than flashing a "nothing playing" card.
-    if (isIdle(guildId)) {
-      seenGuilds.delete(guildId);
-      prefetched.delete(guildId);
-      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-      return;
-    }
-    // Pre-resolve the (new) next-up track so the next hand-off is gapless.
-    ensurePrefetch(guildId);
-    // Keep the public now-playing message current (cheap — hash-gated;
-    // reuses the voice status we already fetched).
-    await nowPlaying.sync(guildId, botRpc, { status }).catch(() => {});
+      // The advance above may have drained the queue — if so, the session
+      // is done: tear down rather than flashing a "nothing playing" card.
+      if (isIdle(guildId)) {
+        seenGuilds.delete(guildId);
+        prefetched.delete(guildId);
+        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+        return;
+      }
+      // Pre-resolve the (new) next-up track so the next hand-off is gapless.
+      ensurePrefetch(guildId);
+      // Keep the public now-playing message current (cheap — hash-gated;
+      // reuses the voice status we already fetched).
+      await nowPlaying.sync(guildId, botRpc, { status }).catch(() => {});
+    });
   } finally {
     inFlight.delete(guildId);
   }
@@ -278,7 +287,14 @@ export function startAdvanceLoop(
   const timer = setInterval(() => {
     const snapshot = [...seenGuilds];
     void Promise.all(
-      snapshot.map((guildId) => processGuild(guildId, botRpc, log, seenGuilds)),
+      snapshot.map((guildId) =>
+        processGuild(guildId, botRpc, log, seenGuilds).catch((err) => {
+          log.warn("advance: processGuild errored", {
+            guildId,
+            err: String(err),
+          });
+        }),
+      ),
     );
   }, ADVANCE_INTERVAL_MS);
   timer.unref();

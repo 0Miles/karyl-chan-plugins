@@ -15,6 +15,7 @@ import {
   DEFAULT_AUTOPLAY_FETCH_COUNT,
   MAX_AUTOPLAY_FETCH_COUNT,
   advance,
+  clearQueue,
   enqueue,
   getState,
   requeueFront,
@@ -23,6 +24,7 @@ import {
   setCurrent,
   setLoop,
 } from "./queue.js";
+import { withGuildLock } from "./guild-lock.js";
 import {
   EMBED_COLOR,
   formatQueueList,
@@ -67,6 +69,18 @@ import {
  *  `/radio` command handler and the WebUI session routes both `.add()`
  *  here; `processGuild` `.delete()`s when a guild's session goes idle. */
 export const seenGuilds = new Set<string>();
+
+/** `/radio` subcommands that don't mutate playback state — they skip the
+ *  per-guild lock (so a read-only `/radio np` isn't held up behind a slow
+ *  `/radio play`). `download` is here too: it can run for minutes and must
+ *  not freeze the advance loop while it holds the lock. */
+const LOCK_FREE_SUBS = new Set([
+  "stations",
+  "manage",
+  "np",
+  "queuelist",
+  "download",
+]);
 
 /** Env-var fallback for the browser-reachable base URL. Only used when the
  *  bot hasn't yet returned a publicBaseUrl (pre-register or no WEB_BASE_URL). */
@@ -255,67 +269,70 @@ function controlHandler(
       return;
     }
 
-    seenGuilds.add(guildId);
+    // Serialize with the advance loop / `/radio` commands (see guild-lock.ts).
+    return withGuildLock(guildId, async (): Promise<ComponentReply> => {
+      seenGuilds.add(guildId);
 
-    if (action === "stop") {
-      await doStop(guildId, ctx.botRpc);
-      sessionTokens.delete(guildId);
-      const onPublicMessage =
-        nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
-      await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
-      // The public message is now deleted — if the click was on it there's
-      // nothing left to PATCH; if it was on a /radio np message, leave a notice.
-      return onPublicMessage
-        ? undefined
-        : {
-            embeds: [
-              { color: EMBED_COLOR, description: "⏹ 已停止播放並離開語音頻道。" },
-            ],
-            components: [],
-          };
-    }
-
-    let paused = status.paused === true;
-    if (action === "next") {
-      const r = await doNext(guildId, ctx.botRpc);
-      if (r.kind === "queue-empty") {
-        // Queue drained — playback stopped. Tear the panel down rather
-        // than leave a "nothing playing" card with live buttons. (Check
-        // whether this click was on that very message *before* teardown
-        // forgets it.)
+      if (action === "stop") {
+        await doStop(guildId, ctx.botRpc);
+        sessionTokens.delete(guildId);
         const onPublicMessage =
           nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
         await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+        // The public message is now deleted — if the click was on it there's
+        // nothing left to PATCH; if it was on a /radio np message, leave a notice.
         return onPublicMessage
           ? undefined
           : {
               embeds: [
-                {
-                  color: EMBED_COLOR,
-                  description: "⏹ 佇列播完了，已停止播放。",
-                },
+                { color: EMBED_COLOR, description: "⏹ 已停止播放並離開語音頻道。" },
               ],
               components: [],
             };
       }
-      paused = false; // a fresh voice.play isn't paused
-    } else if (action === "prev") {
-      await doPrev(guildId, ctx.botRpc);
-      paused = false;
-    } else if (action === "pause") {
-      ({ paused } = await doPause(guildId, ctx.botRpc));
-    } else if (action === "loop") {
-      const cur: LoopMode = getState(guildId)?.loop ?? "off";
-      setLoop(guildId, cycleLoopMode(cur));
-    } else if (action === "autoplay") {
-      setAutoplay(guildId, !(getState(guildId)?.autoplay ?? false));
-    }
 
-    const reply = await syncNowPlaying(guildId, ctx.botRpc, {
-      status: { connected: true, channelId: status.channelId, paused },
-      skipMessageId: ctx.messageId,
+      let paused = status.paused === true;
+      if (action === "next") {
+        const r = await doNext(guildId, ctx.botRpc);
+        if (r.kind === "queue-empty") {
+          // Queue drained — playback stopped. Tear the panel down rather
+          // than leave a "nothing playing" card with live buttons. (Check
+          // whether this click was on that very message *before* teardown
+          // forgets it.)
+          const onPublicMessage =
+            nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
+          await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+          return onPublicMessage
+            ? undefined
+            : {
+                embeds: [
+                  {
+                    color: EMBED_COLOR,
+                    description: "⏹ 佇列播完了，已停止播放。",
+                  },
+                ],
+                components: [],
+              };
+        }
+        paused = false; // a fresh voice.play isn't paused
+      } else if (action === "prev") {
+        await doPrev(guildId, ctx.botRpc);
+        paused = false;
+      } else if (action === "pause") {
+        ({ paused } = await doPause(guildId, ctx.botRpc));
+      } else if (action === "loop") {
+        const cur: LoopMode = getState(guildId)?.loop ?? "off";
+        setLoop(guildId, cycleLoopMode(cur));
+      } else if (action === "autoplay") {
+        setAutoplay(guildId, !(getState(guildId)?.autoplay ?? false));
+      }
+
+      const reply = await syncNowPlaying(guildId, ctx.botRpc, {
+        status: { connected: true, channelId: status.channelId, paused },
+        skipMessageId: ctx.messageId,
+      });
+      return reply ?? undefined;
     });
-    return reply ?? undefined;
   };
 }
 
@@ -527,350 +544,366 @@ export default function buildPlugin() {
               const userId = ctx.userId;
               const sub = ctx.subCommandName;
 
-              switch (sub) {
-                case "stations":
-                  return formatStationList();
+              // Playback-state mutators serialize per guild — against each
+              // other and the 1 s auto-advance loop — so a state-changing
+              // `/radio` command can't interleave with the loop's
+              // advance() / autoplay refill and corrupt the queue. Read-only
+              // subs (and `download`, which can run for minutes) skip it.
+              const dispatch = async (): Promise<CommandReply> => {
+                switch (sub) {
+                  case "stations":
+                    return formatStationList();
 
-                case "manage": {
-                  const res = (await ctx.botRpc("/api/plugin/auth.session", {
-                    user_id: userId,
-                    kind: "manage",
-                  })) as { allowed?: boolean; token?: string } | null;
-                  // botRpc returns null on a non-2xx (e.g. the bot hasn't
-                  // approved this plugin's `auth.session` RPC scope yet), and a
-                  // truthy { allowed:false } when the *user* lacks the capability.
-                  if (res === null) {
+                  case "manage": {
+                    const res = (await ctx.botRpc("/api/plugin/auth.session", {
+                      user_id: userId,
+                      kind: "manage",
+                    })) as { allowed?: boolean; token?: string } | null;
+                    // botRpc returns null on a non-2xx (e.g. the bot hasn't
+                    // approved this plugin's `auth.session` RPC scope yet), and a
+                    // truthy { allowed:false } when the *user* lacks the capability.
+                    if (res === null) {
+                      return {
+                        content:
+                          "⚠ Couldn't mint a login link — the bot rejected the request " +
+                          `(plugin \`${PLUGIN_KEY}\` may need its \`auth.session\` RPC scope approved, or the bot is unavailable).`,
+                        ephemeral: true,
+                      };
+                    }
+                    if (res.allowed !== true || typeof res.token !== "string") {
+                      return {
+                        content:
+                          `⚠ You're not allowed to manage Karyl Radio. Need the \`plugin:${PLUGIN_KEY}:webui.access\` capability ` +
+                          "(bot owners and admins are exempt). Ask an admin to grant it to your role.",
+                        ephemeral: true,
+                      };
+                    }
                     return {
                       content:
-                        "⚠ Couldn't mint a login link — the bot rejected the request " +
-                        `(plugin \`${PLUGIN_KEY}\` may need its \`auth.session\` RPC scope approved, or the bot is unavailable).`,
+                        "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Link valid ~15 minutes.",
+                      components: [
+                        linkButtonRow(
+                          "🔧 Open admin WebUI",
+                          `${effectiveBase()}/?token=${res.token}`,
+                        ),
+                      ],
                       ephemeral: true,
                     };
                   }
-                  if (res.allowed !== true || typeof res.token !== "string") {
-                    return {
-                      content:
-                        `⚠ You're not allowed to manage Karyl Radio. Need the \`plugin:${PLUGIN_KEY}:webui.access\` capability ` +
-                        "(bot owners and admins are exempt). Ask an admin to grant it to your role.",
-                      ephemeral: true,
-                    };
-                  }
-                  return {
-                    content:
-                      "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Link valid ~15 minutes.",
-                    components: [
-                      linkButtonRow(
-                        "🔧 Open admin WebUI",
-                        `${effectiveBase()}/?token=${res.token}`,
-                      ),
-                    ],
-                    ephemeral: true,
-                  };
-                }
 
-                case "np": {
-                  // Same embed + control buttons as the public now-playing
-                  // message, but ephemeral and not auto-updated — only its
-                  // own buttons edit it.
-                  const status = (await ctx.botRpc("/api/plugin/voice.status", {
-                    guild_id: guildId,
-                  })) as { channelId?: string | null; paused?: boolean } | null;
-                  const webuiUrl = await webuiUrlFor(
-                    ctx.botRpc,
-                    userId,
-                    guildId,
-                  );
-                  return {
-                    embeds: [
-                      renderNowPlayingEmbed(guildId, {
-                        channelId: status?.channelId ?? null,
-                        paused: !!status?.paused,
-                      }),
-                    ],
-                    components: nowPlayingComponents(
-                      PLUGIN_KEY,
-                      guildId,
-                      { paused: !!status?.paused },
-                      webuiUrl,
-                    ),
-                    ephemeral: true,
-                  };
-                }
-
-                case "queuelist":
-                  return playbackReply(ctx, guildId, {
-                    title: "📜 Queue",
-                    description: formatQueueList(guildId),
-                  });
-
-                case "download": {
-                  if (!ctx.hasCapability("download")) {
-                    return {
-                      content:
-                        `⚠ You need the \`plugin:${PLUGIN_KEY}:download\` capability to download external audio — ` +
-                        "ask an admin to grant it to your role (bot owners/admins are exempt). " +
-                        "Everything else under `/radio` works without it.",
-                      ephemeral: true,
-                    };
-                  }
-                  const url =
-                    typeof ctx.options.url === "string" ? ctx.options.url : "";
-                  if (!url) return "⚠ Please provide a URL.";
-                  if (!isHttpUrl(url)) {
-                    return "⚠ That doesn't look like an http(s) URL.";
-                  }
-                  if (isYouTubePlaylistUrl(url)) {
-                    return "⚠ That's a playlist — use `/radio queue <playlist URL>` to queue it. `/radio download` takes a single track URL.";
-                  }
-                  try {
-                    const { track, alreadyExisted } = await downloadAndStore(
-                      url,
+                  case "np": {
+                    // Same embed + control buttons as the public now-playing
+                    // message, but ephemeral and not auto-updated — only its
+                    // own buttons edit it.
+                    const status = (await ctx.botRpc("/api/plugin/voice.status", {
+                      guild_id: guildId,
+                    })) as { channelId?: string | null; paused?: boolean } | null;
+                    const webuiUrl = await webuiUrlFor(
+                      ctx.botRpc,
                       userId,
+                      guildId,
                     );
-                    return alreadyExisted
-                      ? `↩ Already in library: **${track.title}**${fmtDuration(track.duration)} — use \`/radio play ${track.title}\` (or paste the URL again).`
-                      : `✅ Downloaded **${track.title}**${fmtDuration(track.duration)} to library.`;
-                  } catch (err) {
-                    const msg =
-                      err instanceof Error ? err.message : "unknown error";
-                    ctx.log.error(`download failed: ${msg}`, { url });
-                    return `⚠ Download failed: ${msg.slice(0, 200)}`;
+                    return {
+                      embeds: [
+                        renderNowPlayingEmbed(guildId, {
+                          channelId: status?.channelId ?? null,
+                          paused: !!status?.paused,
+                        }),
+                      ],
+                      components: nowPlayingComponents(
+                        PLUGIN_KEY,
+                        guildId,
+                        { paused: !!status?.paused },
+                        webuiUrl,
+                      ),
+                      ephemeral: true,
+                    };
                   }
-                }
 
-                case "loop": {
-                  const mode =
-                    typeof ctx.options.mode === "string"
-                      ? ctx.options.mode
-                      : "off";
-                  if (mode !== "off" && mode !== "track" && mode !== "queue") {
-                    return "⚠ mode must be one of: off / track / queue";
-                  }
-                  setLoop(guildId, mode);
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  return playbackReply(ctx, guildId, {
-                    description: `${loopBadge(mode)} Loop mode set to **${mode}**.`,
-                  });
-                }
-
-                case "autoplay": {
-                  const mode =
-                    typeof ctx.options.mode === "string"
-                      ? ctx.options.mode
-                      : "";
-                  if (mode !== "on" && mode !== "off") {
-                    return "⚠ mode must be `on` or `off`.";
-                  }
-                  setAutoplay(guildId, mode === "on");
-                  const apCount =
-                    getState(guildId)?.autoplayFetchCount ??
-                    DEFAULT_AUTOPLAY_FETCH_COUNT;
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  return playbackReply(ctx, guildId, {
-                    description:
-                      mode === "on"
-                        ? `♾️ Autoplay **on** — when the queue runs out I'll queue **${apCount}** YouTube recommendation${apCount === 1 ? "" : "s"} (change with \`/radio autoplay-count\`) seeded from the last YouTube track.`
-                        : "Autoplay **off** — playback stops when the queue ends.",
-                  });
-                }
-
-                case "autoplay-count": {
-                  const cur =
-                    getState(guildId)?.autoplayFetchCount ??
-                    DEFAULT_AUTOPLAY_FETCH_COUNT;
-                  const raw = ctx.options.count;
-                  if (raw === undefined || raw === null) {
+                  case "queuelist":
                     return playbackReply(ctx, guildId, {
-                      description: `♾️ Autoplay queues **${cur}** recommendation${cur === 1 ? "" : "s"} per refill. Pass \`count:\` (1–${MAX_AUTOPLAY_FETCH_COUNT}) to change it.`,
+                      title: "📜 Queue",
+                      description: formatQueueList(guildId),
+                    });
+
+                  case "download": {
+                    if (!ctx.hasCapability("download")) {
+                      return {
+                        content:
+                          `⚠ You need the \`plugin:${PLUGIN_KEY}:download\` capability to download external audio — ` +
+                          "ask an admin to grant it to your role (bot owners/admins are exempt). " +
+                          "Everything else under `/radio` works without it.",
+                        ephemeral: true,
+                      };
+                    }
+                    const url =
+                      typeof ctx.options.url === "string" ? ctx.options.url : "";
+                    if (!url) return "⚠ Please provide a URL.";
+                    if (!isHttpUrl(url)) {
+                      return "⚠ That doesn't look like an http(s) URL.";
+                    }
+                    if (isYouTubePlaylistUrl(url)) {
+                      return "⚠ That's a playlist — use `/radio queue <playlist URL>` to queue it. `/radio download` takes a single track URL.";
+                    }
+                    try {
+                      const { track, alreadyExisted } = await downloadAndStore(
+                        url,
+                        userId,
+                      );
+                      return alreadyExisted
+                        ? `↩ Already in library: **${track.title}**${fmtDuration(track.duration)} — use \`/radio play ${track.title}\` (or paste the URL again).`
+                        : `✅ Downloaded **${track.title}**${fmtDuration(track.duration)} to library.`;
+                    } catch (err) {
+                      const msg =
+                        err instanceof Error ? err.message : "unknown error";
+                      ctx.log.error(`download failed: ${msg}`, { url });
+                      return `⚠ Download failed: ${msg.slice(0, 200)}`;
+                    }
+                  }
+
+                  case "loop": {
+                    const mode =
+                      typeof ctx.options.mode === "string"
+                        ? ctx.options.mode
+                        : "off";
+                    if (mode !== "off" && mode !== "track" && mode !== "queue") {
+                      return "⚠ mode must be one of: off / track / queue";
+                    }
+                    setLoop(guildId, mode);
+                    await syncNowPlaying(guildId, ctx.botRpc);
+                    return playbackReply(ctx, guildId, {
+                      description: `${loopBadge(mode)} Loop mode set to **${mode}**.`,
                     });
                   }
-                  const n = Number(raw);
-                  if (!Number.isFinite(n)) {
-                    return "⚠ count must be a whole number.";
-                  }
-                  const set = setAutoplayFetchCount(guildId, n);
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  const clampedNote =
-                    set !== Math.floor(n)
-                      ? ` (clamped to the 1–${MAX_AUTOPLAY_FETCH_COUNT} range)`
-                      : "";
-                  return playbackReply(ctx, guildId, {
-                    description: `♾️ Autoplay will now queue **${set}** recommendation${set === 1 ? "" : "s"} per refill${clampedNote}. Takes effect at the next refill; tracks already queued stay.`,
-                  });
-                }
 
-                case "stop": {
-                  await doStop(guildId, ctx.botRpc);
-                  sessionTokens.delete(guildId);
-                  await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
-                  return "✓ Stopped, queue cleared, and left voice.";
-                }
-
-                case "skip": {
-                  const r = await doNext(guildId, ctx.botRpc);
-                  if (r.kind === "queue-empty") {
-                    await nowPlaying
-                      .teardown(guildId, ctx.botRpc)
-                      .catch(() => {});
-                    return "Queue empty — stopped playback.";
-                  }
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  if (r.kind === "playing")
+                  case "autoplay": {
+                    const mode =
+                      typeof ctx.options.mode === "string"
+                        ? ctx.options.mode
+                        : "";
+                    if (mode !== "on" && mode !== "off") {
+                      return "⚠ mode must be `on` or `off`.";
+                    }
+                    setAutoplay(guildId, mode === "on");
+                    const apCount =
+                      getState(guildId)?.autoplayFetchCount ??
+                      DEFAULT_AUTOPLAY_FETCH_COUNT;
+                    await syncNowPlaying(guildId, ctx.botRpc);
                     return playbackReply(ctx, guildId, {
-                      description: `⏭ Skipped. Now playing **${r.track.label}**.`,
-                      ...(r.track.coverUrl
+                      description:
+                        mode === "on"
+                          ? `♾️ Autoplay **on** — when the queue runs out I'll queue **${apCount}** YouTube recommendation${apCount === 1 ? "" : "s"} (change with \`/radio autoplay-count\`) seeded from the last YouTube track.`
+                          : "Autoplay **off** — playback stops when the queue ends.",
+                    });
+                  }
+
+                  case "autoplay-count": {
+                    const cur =
+                      getState(guildId)?.autoplayFetchCount ??
+                      DEFAULT_AUTOPLAY_FETCH_COUNT;
+                    const raw = ctx.options.count;
+                    if (raw === undefined || raw === null) {
+                      return playbackReply(ctx, guildId, {
+                        description: `♾️ Autoplay queues **${cur}** recommendation${cur === 1 ? "" : "s"} per refill. Pass \`count:\` (1–${MAX_AUTOPLAY_FETCH_COUNT}) to change it.`,
+                      });
+                    }
+                    const n = Number(raw);
+                    if (!Number.isFinite(n)) {
+                      return "⚠ count must be a whole number.";
+                    }
+                    const set = setAutoplayFetchCount(guildId, n);
+                    await syncNowPlaying(guildId, ctx.botRpc);
+                    const clampedNote =
+                      set !== Math.floor(n)
+                        ? ` (clamped to the 1–${MAX_AUTOPLAY_FETCH_COUNT} range)`
+                        : "";
+                    return playbackReply(ctx, guildId, {
+                      description: `♾️ Autoplay will now queue **${set}** recommendation${set === 1 ? "" : "s"} per refill${clampedNote}. Takes effect at the next refill; tracks already queued stay.`,
+                    });
+                  }
+
+                  case "stop": {
+                    await doStop(guildId, ctx.botRpc);
+                    sessionTokens.delete(guildId);
+                    await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+                    return "✓ Stopped, queue cleared, and left voice.";
+                  }
+
+                  case "skip": {
+                    const r = await doNext(guildId, ctx.botRpc);
+                    if (r.kind === "queue-empty") {
+                      await nowPlaying
+                        .teardown(guildId, ctx.botRpc)
+                        .catch(() => {});
+                      return "Queue empty — stopped playback.";
+                    }
+                    await syncNowPlaying(guildId, ctx.botRpc);
+                    if (r.kind === "playing")
+                      return playbackReply(ctx, guildId, {
+                        description: `⏭ Skipped. Now playing **${r.track.label}**.`,
+                        ...(r.track.coverUrl
+                          ? { thumbnail: { url: r.track.coverUrl } }
+                          : {}),
+                      });
+                    if (r.kind === "play-failed")
+                      return playbackReply(ctx, guildId, {
+                        description: `⚠ Couldn't start **${r.track.label}** — re-queued, try again.`,
+                      });
+                    // r.kind === "exhausted"
+                    return playbackReply(ctx, guildId, {
+                      description:
+                        "⚠ Skipped several unplayable tracks — try again.",
+                    });
+                  }
+
+                  case "back": {
+                    const r = await doPrev(guildId, ctx.botRpc);
+                    if (r.kind === "no-history")
+                      return "↩ Nothing in the play history to go back to.";
+                    await syncNowPlaying(guildId, ctx.botRpc);
+                    return playbackReply(ctx, guildId, {
+                      description:
+                        r.kind === "playing"
+                          ? `⏮ Back to **${r.track.label}**.`
+                          : `⚠ Failed to start **${r.track.label}**.`,
+                      ...(r.kind === "playing" && r.track.coverUrl
                         ? { thumbnail: { url: r.track.coverUrl } }
                         : {}),
                     });
-                  if (r.kind === "play-failed")
-                    return playbackReply(ctx, guildId, {
-                      description: `⚠ Couldn't start **${r.track.label}** — re-queued, try again.`,
-                    });
-                  // r.kind === "exhausted"
-                  return playbackReply(ctx, guildId, {
-                    description:
-                      "⚠ Skipped several unplayable tracks — try again.",
-                  });
-                }
-
-                case "back": {
-                  const r = await doPrev(guildId, ctx.botRpc);
-                  if (r.kind === "no-history")
-                    return "↩ Nothing in the play history to go back to.";
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  return playbackReply(ctx, guildId, {
-                    description:
-                      r.kind === "playing"
-                        ? `⏮ Back to **${r.track.label}**.`
-                        : `⚠ Failed to start **${r.track.label}**.`,
-                    ...(r.kind === "playing" && r.track.coverUrl
-                      ? { thumbnail: { url: r.track.coverUrl } }
-                      : {}),
-                  });
-                }
-
-                case "queue": {
-                  const source = parseSource(ctx);
-                  if (isYouTubePlaylistUrl(source)) {
-                    let tracks: Track[];
-                    try {
-                      tracks = await resolvePlaylist(source, userId);
-                    } catch (err) {
-                      return `⚠ Couldn't expand that playlist — ${(err instanceof Error ? err.message : "error").slice(0, 180)}`;
-                    }
-                    if (tracks.length === 0)
-                      return "⚠ That playlist is empty or unavailable.";
-                    for (const t of tracks) {
-                      t.queuedByName = ctx.userDisplayName;
-                      enqueue(guildId, t);
-                    }
-                    await syncNowPlaying(guildId, ctx.botRpc);
-                    return playbackReply(ctx, guildId, {
-                      description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
-                    });
                   }
-                  const resolved = await resolveSourceOrError(source, userId);
-                  if (typeof resolved === "string") return resolved;
-                  resolved.queuedByName = ctx.userDisplayName;
-                  const position = enqueue(guildId, resolved);
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  return playbackReply(ctx, guildId, {
-                    description: `➕ Queued **${resolved.label}** (position ${position}).`,
-                    ...(resolved.coverUrl
-                      ? { thumbnail: { url: resolved.coverUrl } }
-                      : {}),
-                  });
-                }
 
-                case "play": {
-                  const source = parseSource(ctx);
-                  // A YouTube link carrying `list=` (a Mix/radio share or a
-                  // /playlist URL) implies "keep this going" → switch autoplay
-                  // on; any other source turns it off (a fresh play resets it).
-                  const autoOn = isYouTubeUrlWithList(source);
-                  setAutoplay(guildId, autoOn);
-                  const autoNote = autoOn
-                    ? "\n♾️ Autoplay on — I'll keep going with YouTube recommendations when the queue runs out."
-                    : "";
-                  const joinFirst = async (): Promise<string | null> => {
-                    const joined = await ctx.botRpc("/api/plugin/voice.join", {
-                      guild_id: guildId,
-                      user_id: userId,
-                    });
-                    return joined
-                      ? null
-                      : "⚠ Could not join voice — make sure you're in a voice channel and the bot has permission.";
-                  };
-
-                  if (isYouTubePlaylistUrl(source)) {
-                    let tracks: Track[];
-                    try {
-                      tracks = await resolvePlaylist(source, userId);
-                    } catch (err) {
-                      return `⚠ Couldn't expand that playlist — ${(err instanceof Error ? err.message : "error").slice(0, 180)}`;
-                    }
-                    if (tracks.length === 0)
-                      return "⚠ That playlist is empty or unavailable.";
-                    const joinErr = await joinFirst();
-                    if (joinErr) return joinErr;
-                    for (const t of tracks) {
-                      t.queuedByName = ctx.userDisplayName;
-                      enqueue(guildId, t);
-                    }
-                    // Start the first that resolves (skip a few dead ones).
-                    let started: Track | null = null;
-                    for (let i = 0; i < 5 && !started; i++) {
-                      const next = advance(guildId);
-                      if (!next) break;
-                      const o = await startTrack(ctx, guildId, next);
-                      if (o.ok) {
-                        setCurrent(guildId, o.track);
-                        started = o.track;
-                      } else if (o.reason === "play-failed") {
-                        requeueFront(guildId, next);
-                        break;
+                  case "queue": {
+                    const source = parseSource(ctx);
+                    if (isYouTubePlaylistUrl(source)) {
+                      let tracks: Track[];
+                      try {
+                        tracks = await resolvePlaylist(source, userId);
+                      } catch (err) {
+                        return `⚠ Couldn't expand that playlist — ${(err instanceof Error ? err.message : "error").slice(0, 180)}`;
                       }
+                      if (tracks.length === 0)
+                        return "⚠ That playlist is empty or unavailable.";
+                      for (const t of tracks) {
+                        t.queuedByName = ctx.userDisplayName;
+                        enqueue(guildId, t);
+                      }
+                      await syncNowPlaying(guildId, ctx.botRpc);
+                      return playbackReply(ctx, guildId, {
+                        description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
+                      });
                     }
+                    const resolved = await resolveSourceOrError(source, userId);
+                    if (typeof resolved === "string") return resolved;
+                    resolved.queuedByName = ctx.userDisplayName;
+                    const position = enqueue(guildId, resolved);
                     await syncNowPlaying(guildId, ctx.botRpc);
                     return playbackReply(ctx, guildId, {
-                      title: started
-                        ? "▶️ Playing playlist"
-                        : "▶️ Playlist queued",
-                      description:
-                        (started
-                          ? `**${started.label}** — ${tracks.length} track${tracks.length === 1 ? "" : "s"} queued.`
-                          : `Queued ${tracks.length} track${tracks.length === 1 ? "" : "s"}, but couldn't start the first one.`) +
-                        autoNote,
-                      ...(started?.coverUrl
-                        ? { thumbnail: { url: started.coverUrl } }
+                      description: `➕ Queued **${resolved.label}** (position ${position}).`,
+                      ...(resolved.coverUrl
+                        ? { thumbnail: { url: resolved.coverUrl } }
                         : {}),
                     });
                   }
 
-                  const resolved = await resolveSourceOrError(source, userId);
-                  if (typeof resolved === "string") return resolved;
-                  resolved.queuedByName = ctx.userDisplayName;
-                  const joinErr = await joinFirst();
-                  if (joinErr) return joinErr;
-                  const o = await startTrack(ctx, guildId, resolved);
-                  if (o.ok) setCurrent(guildId, o.track);
-                  await syncNowPlaying(guildId, ctx.botRpc);
-                  return playbackReply(ctx, guildId, {
-                    title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",
-                    description:
-                      (o.ok
-                        ? `**${o.track.label}**`
-                        : `Joined voice but failed to start **${resolved.label}**.`) +
-                      autoNote,
-                    ...(o.ok && o.track.coverUrl
-                      ? { thumbnail: { url: o.track.coverUrl } }
-                      : {}),
-                  });
-                }
+                  case "play": {
+                    const source = parseSource(ctx);
+                    // A YouTube link carrying `list=` (a Mix/radio share or a
+                    // /playlist URL) implies "keep this going" → switch autoplay
+                    // on; any other source turns it off (a fresh play resets it).
+                    const autoOn = isYouTubeUrlWithList(source);
+                    setAutoplay(guildId, autoOn);
+                    const autoNote = autoOn
+                      ? "\n♾️ Autoplay on — I'll keep going with YouTube recommendations when the queue runs out."
+                      : "";
+                    const joinFirst = async (): Promise<string | null> => {
+                      const joined = await ctx.botRpc("/api/plugin/voice.join", {
+                        guild_id: guildId,
+                        user_id: userId,
+                      });
+                      return joined
+                        ? null
+                        : "⚠ Could not join voice — make sure you're in a voice channel and the bot has permission.";
+                    };
 
-                default:
-                  return `⚠ Unknown subcommand \`${sub ?? "(none)"}\``;
-              }
+                    if (isYouTubePlaylistUrl(source)) {
+                      let tracks: Track[];
+                      try {
+                        tracks = await resolvePlaylist(source, userId);
+                      } catch (err) {
+                        return `⚠ Couldn't expand that playlist — ${(err instanceof Error ? err.message : "error").slice(0, 180)}`;
+                      }
+                      if (tracks.length === 0)
+                        return "⚠ That playlist is empty or unavailable.";
+                      const joinErr = await joinFirst();
+                      if (joinErr) return joinErr;
+                      // `play` is a fresh start — drop whatever was queued
+                      // before loading this playlist (use `queue` to append).
+                      clearQueue(guildId);
+                      for (const t of tracks) {
+                        t.queuedByName = ctx.userDisplayName;
+                        enqueue(guildId, t);
+                      }
+                      // Start the first that resolves (skip a few dead ones).
+                      let started: Track | null = null;
+                      for (let i = 0; i < 5 && !started; i++) {
+                        const next = advance(guildId);
+                        if (!next) break;
+                        const o = await startTrack(ctx, guildId, next);
+                        if (o.ok) {
+                          setCurrent(guildId, o.track);
+                          started = o.track;
+                        } else if (o.reason === "play-failed") {
+                          requeueFront(guildId, next);
+                          break;
+                        }
+                      }
+                      await syncNowPlaying(guildId, ctx.botRpc);
+                      return playbackReply(ctx, guildId, {
+                        title: started
+                          ? "▶️ Playing playlist"
+                          : "▶️ Playlist queued",
+                        description:
+                          (started
+                            ? `**${started.label}** — ${tracks.length} track${tracks.length === 1 ? "" : "s"} queued.`
+                            : `Queued ${tracks.length} track${tracks.length === 1 ? "" : "s"}, but couldn't start the first one.`) +
+                          autoNote,
+                        ...(started?.coverUrl
+                          ? { thumbnail: { url: started.coverUrl } }
+                          : {}),
+                      });
+                    }
+
+                    const resolved = await resolveSourceOrError(source, userId);
+                    if (typeof resolved === "string") return resolved;
+                    resolved.queuedByName = ctx.userDisplayName;
+                    const joinErr = await joinFirst();
+                    if (joinErr) return joinErr;
+                    // `play` is a fresh start — discard whatever was queued
+                    // before (use `/radio queue` to keep & append instead).
+                    clearQueue(guildId);
+                    const o = await startTrack(ctx, guildId, resolved);
+                    if (o.ok) setCurrent(guildId, o.track);
+                    await syncNowPlaying(guildId, ctx.botRpc);
+                    return playbackReply(ctx, guildId, {
+                      title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",
+                      description:
+                        (o.ok
+                          ? `**${o.track.label}**`
+                          : `Joined voice but failed to start **${resolved.label}**.`) +
+                        autoNote,
+                      ...(o.ok && o.track.coverUrl
+                        ? { thumbnail: { url: o.track.coverUrl } }
+                        : {}),
+                    });
+                  }
+
+                  default:
+                    return `⚠ Unknown subcommand \`${sub ?? "(none)"}\``;
+                }
+              };
+              return sub && !LOCK_FREE_SUBS.has(sub)
+                ? withGuildLock(guildId, dispatch)
+                : dispatch();
             },
           }),
         ],
