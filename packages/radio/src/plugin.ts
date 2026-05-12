@@ -10,9 +10,7 @@ import {
   type Track,
   advance,
   enqueue,
-  previous,
   requeueFront,
-  reset,
   setCurrent,
   setLoop,
 } from "./queue.js";
@@ -22,6 +20,7 @@ import {
   formatStationList,
   loopBadge,
 } from "./format.js";
+import { doNext, doPrev, doStop } from "./playback-actions.js";
 import { isHttpUrl, isYouTubePlaylistUrl } from "./downloader.js";
 import { downloadAndStore } from "./library.js";
 import {
@@ -435,47 +434,27 @@ export default function buildPlugin() {
                 }
 
                 case "stop": {
-                  await Promise.all([
-                    ctx.botRpc("/api/plugin/voice.stop", { guild_id: guildId }),
-                    ctx.botRpc("/api/plugin/voice.leave", {
-                      guild_id: guildId,
-                    }),
-                  ]);
-                  reset(guildId);
+                  await doStop(guildId, ctx.botRpc);
                   sessionTokens.delete(guildId);
                   return "✓ Stopped, queue cleared, and left voice.";
                 }
 
                 case "skip": {
-                  // Skip past unresolvable items (deleted/private playlist
-                  // entries) — up to a few hops.
-                  for (let attempt = 0; attempt < 5; attempt++) {
-                    const next = advance(guildId);
-                    if (!next) {
-                      await ctx.botRpc("/api/plugin/voice.stop", {
-                        guild_id: guildId,
-                      });
-                      return "Queue empty — stopped playback.";
-                    }
-                    const o = await startTrack(ctx, guildId, next);
-                    if (o.ok) {
-                      setCurrent(guildId, o.track);
-                      return playbackReply(ctx, guildId, {
-                        description: `⏭ Skipped. Now playing **${o.track.label}**.`,
-                        ...(o.track.coverUrl
-                          ? { thumbnail: { url: o.track.coverUrl } }
-                          : {}),
-                      });
-                    }
-                    if (o.reason === "play-failed") {
-                      requeueFront(guildId, next);
-                      return playbackReply(ctx, guildId, {
-                        description: `⚠ Couldn't start **${next.label}** — re-queued, try again.`,
-                      });
-                    }
-                    // unresolvable — already dropped from the queue; try the next.
-                    ctx.log.warn(`skip: dropped unplayable track ${next.url}`);
-                  }
+                  const r = await doNext(guildId, ctx.botRpc);
+                  if (r.kind === "queue-empty")
+                    return "Queue empty — stopped playback.";
+                  if (r.kind === "playing")
+                    return playbackReply(ctx, guildId, {
+                      description: `⏭ Skipped. Now playing **${r.track.label}**.`,
+                      ...(r.track.coverUrl
+                        ? { thumbnail: { url: r.track.coverUrl } }
+                        : {}),
+                    });
+                  if (r.kind === "play-failed")
+                    return playbackReply(ctx, guildId, {
+                      description: `⚠ Couldn't start **${r.track.label}** — re-queued, try again.`,
+                    });
+                  // r.kind === "exhausted"
                   return playbackReply(ctx, guildId, {
                     description:
                       "⚠ Skipped several unplayable tracks — try again.",
@@ -483,18 +462,16 @@ export default function buildPlugin() {
                 }
 
                 case "back": {
-                  const prev = previous(guildId);
-                  if (!prev)
+                  const r = await doPrev(guildId, ctx.botRpc);
+                  if (r.kind === "no-history")
                     return "↩ Nothing in the play history to go back to.";
-                  const o = await startTrack(ctx, guildId, prev);
-                  if (o.ok) setCurrent(guildId, o.track);
-                  else if (!prev.needsResolve) setCurrent(guildId, prev);
                   return playbackReply(ctx, guildId, {
-                    description: o.ok
-                      ? `⏮ Back to **${o.track.label}**.`
-                      : `⚠ Failed to start **${prev.label}**.`,
-                    ...(o.ok && o.track.coverUrl
-                      ? { thumbnail: { url: o.track.coverUrl } }
+                    description:
+                      r.kind === "playing"
+                        ? `⏮ Back to **${r.track.label}**.`
+                        : `⚠ Failed to start **${r.track.label}**.`,
+                    ...(r.kind === "playing" && r.track.coverUrl
+                      ? { thumbnail: { url: r.track.coverUrl } }
                       : {}),
                   });
                 }

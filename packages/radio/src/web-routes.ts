@@ -31,19 +31,15 @@ import {
 import {
   type LoopMode,
   type Track,
-  advance,
   clearQueue,
   dequeueAt,
   enqueue,
   getState,
-  previous,
-  requeueFront,
-  setCurrent,
   setLoop,
 } from "./queue.js";
+import { doNext, doPrev } from "./playback-actions.js";
 import {
   isYouTubePlaylistUrl,
-  playTrack,
   resolveAnyTrack,
   resolvePlaylist,
 } from "./resolver.js";
@@ -452,9 +448,6 @@ export async function registerWebRoutes(
     },
   );
 
-  const voicePlay = (guildId: string) => (url: string) =>
-    _botRpc!("/api/plugin/voice.play", { guild_id: guildId, url });
-
   server.post<{ Params: { guildId: string } }>(
     "/api/session/:guildId/next",
     async (request, reply) => {
@@ -463,28 +456,7 @@ export async function registerWebRoutes(
       keepAdvancing(guildId);
       if (!_botRpc)
         return reply.code(503).send({ error: "bot RPC unavailable" });
-      // Skip past tracks that can't be resolved (deleted/private playlist
-      // items) — up to a few hops so a couple of dead entries don't stall.
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const next = advance(guildId);
-        if (!next) {
-          await _botRpc("/api/plugin/voice.stop", { guild_id: guildId }).catch(
-            () => null,
-          );
-          return sessionSnapshot(guildId);
-        }
-        const o = await playTrack(next, voicePlay(guildId));
-        if (o.ok) {
-          setCurrent(guildId, o.track);
-          return sessionSnapshot(guildId);
-        }
-        if (o.reason === "play-failed") {
-          // Keep it around — re-queue front so a later tick / next click retries.
-          requeueFront(guildId, next);
-          return sessionSnapshot(guildId);
-        }
-        // unresolvable → already removed from the queue; try the next one.
-      }
+      await doNext(guildId, _botRpc);
       return sessionSnapshot(guildId);
     },
   );
@@ -497,15 +469,9 @@ export async function registerWebRoutes(
       keepAdvancing(guildId);
       if (!_botRpc)
         return reply.code(503).send({ error: "bot RPC unavailable" });
-      const prev = previous(guildId);
-      if (!prev)
+      const r = await doPrev(guildId, _botRpc);
+      if (r.kind === "no-history")
         return reply.code(409).send({ error: "Nothing to go back to" });
-      const o = await playTrack(prev, voicePlay(guildId));
-      // Keep `prev` as current on a (transient) play failure so the
-      // history entry isn't silently lost; a lazy entry that won't
-      // resolve at all is dropped (showing it as "now playing" would lie).
-      if (o.ok) setCurrent(guildId, o.track);
-      else if (!prev.needsResolve) setCurrent(guildId, prev);
       return sessionSnapshot(guildId);
     },
   );
