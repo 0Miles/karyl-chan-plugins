@@ -23,8 +23,6 @@ RUN apt-get update && \
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /out ./
-# Copy UI static files into dist
-COPY --from=build /repo/packages/radio/src/ui ./dist/ui
 RUN mkdir -p /app/data/music /app/data/covers && chown -R node:node /app/data
 VOLUME /app/data/music
 VOLUME /app/data/covers

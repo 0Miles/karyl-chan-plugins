@@ -752,13 +752,18 @@ export async function registerWebRoutes(
   );
 
   // ── SPA ─────────────────────────────────────────────────────────────────
+  // The Vue source under web/ is built by Vite into a single-file bundle at
+  // dist/ui/index.html (all JS+CSS inlined — see vite.config.ts) so that the
+  // existing inline-only CSP and per-request __PLUGIN_BASE__ injection still
+  // work unchanged. Both the prod runtime (where this module is dist/web-routes.js)
+  // and `tsx watch src/web-routes.ts` resolve to the same dist/ui location.
   const __dirname = dirname(fileURLToPath(import.meta.url));
   let htmlContent: string;
   try {
     htmlContent = readFileSync(join(__dirname, "ui", "index.html"), "utf-8");
   } catch {
     htmlContent = readFileSync(
-      join(__dirname, "..", "src", "ui", "index.html"),
+      join(__dirname, "..", "dist", "ui", "index.html"),
       "utf-8",
     );
   }
