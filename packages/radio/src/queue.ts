@@ -1,30 +1,37 @@
 /**
- * Per-guild playback queue + loop state.
+ * Per-guild playback state — cursor-based playlist.
  *
- * Tracks which URL is "now playing" in each guild, what's lined up
- * after it, and what was played before it (for "previous"). Supports
- * three loop modes:
+ * A guild's session is a single ordered `tracks[]` plus a `cursor`
+ * pointing at the currently-playing index. Everything else is a view
+ * over those two:
  *
- *   off    — when a track ends, advance to the next item (or stop if
- *            the queue is empty)
- *   track  — replay the current track until cleared
- *   queue  — like off, but a finished track is appended back to the
- *            tail of the queue, so the cycle repeats
+ *   current  = tracks[cursor]              (when cursor >= 0)
+ *   upcoming = tracks.slice(cursor + 1)    (the WebUI "queue" section)
+ *   played   = tracks.slice(0, cursor)     (rendered reversed = newest first)
  *
- * Stations and arbitrary URLs are both stored as `Track` entries with
- * a label (so the UI can say "Now playing: SomaFM Groove Salad" vs.
- * just dumping the URL). Library-sourced tracks also carry `trackId`
- * and `coverUrl` so the WebUI can render the album art and link back.
+ * Loop modes:
+ *   off    — peekNext returns null past the last index (then the
+ *            session stops, or autoplay refills if enabled)
+ *   track  — peekNext / peekPrev return the same track (cursor doesn't
+ *            move; voice.play re-attacks the file)
+ *   queue  — peekNext past the last wraps to 0; peekPrev before 0
+ *            wraps to the last
  *
- * State is in-memory and resets on plugin restart; for a stopgap
- * persistence story future versions could call the bot's plugin KV
- * RPC, but a music queue is naturally session-scoped so most users
- * won't notice the gap. A guild's state is dropped only by `/radio
- * stop` (`reset()`) or a plugin restart — the advance loop merely
- * stops *ticking* an idle guild (so the play log survives a queue that
- * ran dry); a bot in many guilds therefore holds one small bounded
- * `GuildState` per guild that ever started radio. Acceptable for this
- * scale; revisit (idle-TTL sweep) if it ever isn't.
+ * Loop = queue under the previous (queue / history / playLog) model
+ * duplicated the just-prev'd track into the queue tail; cursor-based
+ * navigation can't produce that aliasing because the same Track lives
+ * at exactly one index.
+ *
+ * Resolution / play pattern: callers `peekNext()` to get the candidate
+ * idx + track, `await playTrack(...)`, then `commitCursor(idx)` ONLY on
+ * success. play-failed leaves the cursor where it was (the track is
+ * still in the playlist for retry); unresolvable callers call
+ * `removeTrackAt(idx)` and try again.
+ *
+ * State is in-memory and per-guild; a session is dropped only by
+ * `reset()` (i.e. /radio stop). Played portion is capped at
+ * MAX_PLAYED entries — older played tracks shift off the front and
+ * the cursor decreases to compensate.
  */
 
 export type LoopMode = "off" | "track" | "queue";
@@ -32,14 +39,8 @@ export type LoopMode = "off" | "track" | "queue";
 export interface Track {
   url: string;
   label: string;
-  /**
-   * Stable queue-entry id assigned by enqueue(). The WebUI uses this as
-   * a v-for key and as the identifier in POST /api/session/<g>/dequeue
-   * so per-item removals don't depend on volatile array indices (which
-   * shift under concurrent dequeues / auto-advance). Set on every queue
-   * push; persists onto current / history / playLog when the track
-   * leaves the queue but is meaningful only while it's still in queue.
-   */
+  /** Stable per-enqueue id; used as a v-for key + addressable id for
+   *  the WebUI's dequeue / (future) reorder / jump endpoints. */
   qid?: number;
   /** Discord user id who queued it (for "queued by" mentions in Discord). */
   queuedBy: string | null;
@@ -73,57 +74,21 @@ export interface Track {
   needsResolve?: boolean;
 }
 
-/**
- * One entry in a guild's session play log. `seq` is a stable, monotonic
- * id (process-global) used by the WebUI's re-queue buttons so a click
- * targets the right entry even if the log shifts (cap eviction, a
- * re-played track moving to the tail) between the snapshot poll and the
- * click — the route looks it up by `seq`, not by array index.
- */
-export interface PlayLogEntry {
-  seq: number;
-  track: Track;
-}
-
 export interface GuildState {
-  current: Track | null;
-  queue: Track[];
-  /** Back-stack for the "previous" button — newest last, popped on `previous()`. Capped. */
-  history: Track[];
-  /**
-   * Distinct, recency-ordered log of the tracks played this session
-   * (oldest first, newest last; re-playing a track moves it to the
-   * tail rather than duplicating it), capped at PLAY_LOG_MAX. Unlike
-   * `history` it's never popped — it survives skipping forward and
-   * stepping back, so the WebUI "played this session" list / re-queue
-   * buttons see the full set. Reset by `/radio stop` (`reset()`) or a
-   * plugin restart; NOT cleared just because the queue ran dry.
-   */
-  playLog: PlayLogEntry[];
+  /** Full ordered playlist for this session — single source of truth. */
+  tracks: Track[];
+  /** Index of the currently-playing track; -1 = nothing playing yet. */
+  cursor: number;
   loop: LoopMode;
   /**
-   * When true, the auto-advance loop keeps the queue topped up with
-   * YouTube "mix" recommendations seeded from the most recent YouTube
-   * track this session (see advance-loop.ts) — so playback continues
-   * past the end of the queue. Off by default; only acts while
-   * `loop === "off"`. Set via `/radio autoplay`, the WebUI toggle, or
-   * automatically when a `/radio play` source is a YouTube URL carrying
-   * a `list=` param. Survives a dry queue; reset by `/radio stop`.
+   * When true, the moment a track becomes current AND it's the last in
+   * the playlist AND loop is "off", fetch a YouTube "mix" seeded from
+   * that track and append the recommendations. See advance-loop.ts.
    */
   autoplay: boolean;
-  /**
-   * The YouTube video id we last generated autoplay recommendations
-   * from. Set before the (slow) yt-dlp fetch so a still-running or
-   * fruitless fetch doesn't re-trigger every tick; cleared when
-   * autoplay is turned off.
-   */
+  /** Last YouTube video id we generated autoplay recs from (de-bounces refills). */
   autoplaySeededFrom: string | null;
-  /**
-   * How many recommendations the autoplay refill enqueues at once when
-   * the queue runs dry. Higher = fewer (rarer) yt-dlp "mix" fetches and
-   * a longer look-ahead; lower = recommendations track the current song
-   * more closely. Live-tunable per session via `/radio autoplay-count`.
-   */
+  /** How many recommendations the autoplay refill appends per fire. */
   autoplayFetchCount: number;
 }
 
@@ -133,23 +98,18 @@ export const DEFAULT_AUTOPLAY_FETCH_COUNT = 7;
  *  yields ~25–50 entries, fewer after de-duping recently played ones). */
 export const MAX_AUTOPLAY_FETCH_COUNT = 25;
 
-/** How many played tracks to remember for the "previous" button. */
-const HISTORY_MAX = 50;
-/** How many distinct tracks to keep in the per-session play log. */
-const PLAY_LOG_MAX = 50;
-
-let nextPlayLogSeq = 1;
+/** Played portion is trimmed to at most this many entries (oldest off). */
+const MAX_PLAYED = 100;
 
 const states = new Map<string, GuildState>();
+let nextQid = 1;
 
 function ensure(guildId: string): GuildState {
   let s = states.get(guildId);
   if (!s) {
     s = {
-      current: null,
-      queue: [],
-      history: [],
-      playLog: [],
+      tracks: [],
+      cursor: -1,
       loop: "off",
       autoplay: false,
       autoplaySeededFrom: null,
@@ -164,90 +124,125 @@ export function getState(guildId: string): GuildState | null {
   return states.get(guildId) ?? null;
 }
 
-/**
- * Replace the current track and start "playing" it (caller drives
- * playback). When `track` is non-null it's recorded in the session play
- * log: any existing entry for the same `url` is dropped, then a fresh
- * entry is appended at the tail (so the log stays distinct and
- * recency-ordered), evicting the oldest if over PLAY_LOG_MAX.
- */
-export function setCurrent(guildId: string, track: Track | null): void {
-  const s = ensure(guildId);
-  s.current = track;
-  if (track) {
-    const existingIdx = s.playLog.findIndex((e) => e.track.url === track.url);
-    if (existingIdx !== -1) s.playLog.splice(existingIdx, 1);
-    s.playLog.push({ seq: nextPlayLogSeq++, track });
-    if (s.playLog.length > PLAY_LOG_MAX) {
-      s.playLog.splice(0, s.playLog.length - PLAY_LOG_MAX);
-    }
-  }
+// ── views ─────────────────────────────────────────────────────────────
+
+export function getCurrent(s: GuildState): Track | null {
+  return s.cursor >= 0 && s.cursor < s.tracks.length ? s.tracks[s.cursor] : null;
 }
 
-let nextQid = 1;
+export function getUpcoming(s: GuildState): Track[] {
+  return s.cursor < 0 ? s.tracks.slice() : s.tracks.slice(s.cursor + 1);
+}
+
+/** Played portion in stored (oldest-first) order; callers reverse for display. */
+export function getPlayed(s: GuildState): Track[] {
+  return s.cursor <= 0 ? [] : s.tracks.slice(0, s.cursor);
+}
+
+// ── enqueue / mutate playlist ────────────────────────────────────────
 
 export function enqueue(guildId: string, track: Track): number {
   const s = ensure(guildId);
   if (track.qid === undefined) track.qid = nextQid++;
-  s.queue.push(track);
-  return s.queue.length;
-}
-
-export function requeueFront(guildId: string, track: Track): void {
-  // Retain the existing qid when a play-failed track is pushed back —
-  // the WebUI is still showing it under that key.
-  ensure(guildId).queue.unshift(track);
-}
-
-export function clearQueue(guildId: string): void {
-  ensure(guildId).queue.length = 0;
-}
-
-/** Remove the queue entry at `index` (0-based). Returns the removed track or null. */
-export function dequeueAt(guildId: string, index: number): Track | null {
-  const s = ensure(guildId);
-  if (!Number.isInteger(index) || index < 0 || index >= s.queue.length) {
-    return null;
-  }
-  return s.queue.splice(index, 1)[0] ?? null;
+  s.tracks.push(track);
+  // First enqueue while idle: leave cursor at -1; the caller's first
+  // advance() will commit it to 0. Don't auto-play just by enqueueing.
+  return s.tracks.length - s.cursor - 1; // upcoming count after this push
 }
 
 /**
- * Remove every queue entry whose `qid` is in `qids`. Returns the count
- * of entries actually removed (entries already gone — e.g. the
- * auto-advance loop picked them up, or a previous dequeue already took
- * them — are silently skipped). Batched so a UI burst of "remove these"
- * lands as a single splice pass + one Discord message sync, instead of
- * N sequential locks each doing their own sync.
+ * Put `track` back so the *next* advance picks it up — used by the
+ * advance loop when voice.play fails transiently. With the cursor model
+ * the cursor never moved past it (play-failed = no commit), so we just
+ * insert immediately after the cursor.
+ */
+export function requeueFront(guildId: string, track: Track): void {
+  const s = ensure(guildId);
+  if (track.qid === undefined) track.qid = nextQid++;
+  s.tracks.splice(s.cursor + 1, 0, track);
+}
+
+/** Drop the upcoming portion — leaves played + current intact. */
+export function clearQueue(guildId: string): void {
+  const s = ensure(guildId);
+  if (s.cursor < 0) {
+    s.tracks.length = 0;
+    return;
+  }
+  s.tracks.length = s.cursor + 1;
+}
+
+/**
+ * Remove the upcoming entry at `index` (0 = first upcoming track).
+ * Returns the removed Track or null. Indices are relative to the
+ * upcoming portion only — what the WebUI sees in its queue list.
+ */
+export function dequeueAt(guildId: string, index: number): Track | null {
+  const s = ensure(guildId);
+  if (!Number.isInteger(index) || index < 0) return null;
+  const absIdx = s.cursor + 1 + index;
+  if (absIdx >= s.tracks.length) return null;
+  return s.tracks.splice(absIdx, 1)[0] ?? null;
+}
+
+/**
+ * Remove every track whose `qid` is in `qids` regardless of which side
+ * of the cursor it's on. Returns count actually removed. Adjusts the
+ * cursor so it still points at the same Track (or to the next item, if
+ * the cursor track itself was one of the removed qids).
  */
 export function dequeueByQids(guildId: string, qids: number[]): number {
   const s = ensure(guildId);
-  if (qids.length === 0) return 0;
+  if (qids.length === 0 || s.tracks.length === 0) return 0;
   const want = new Set(qids);
-  const before = s.queue.length;
-  s.queue = s.queue.filter((t) => !(t.qid !== undefined && want.has(t.qid)));
-  return before - s.queue.length;
+  const before = s.tracks.length;
+  const next: Track[] = [];
+  let removedBeforeCursor = 0;
+  let cursorRemoved = false;
+  for (let i = 0; i < s.tracks.length; i++) {
+    const t = s.tracks[i];
+    if (t.qid !== undefined && want.has(t.qid)) {
+      if (i < s.cursor) removedBeforeCursor++;
+      else if (i === s.cursor) cursorRemoved = true;
+      continue;
+    }
+    next.push(t);
+  }
+  s.tracks = next;
+  s.cursor -= removedBeforeCursor;
+  // If the cursor track was removed, leave cursor pointing at what's
+  // now at that index (effectively the formerly-next track). If the
+  // tail was also removed, clamp to -1.
+  if (cursorRemoved) {
+    if (s.cursor >= s.tracks.length) s.cursor = s.tracks.length - 1;
+    if (s.cursor < 0) s.cursor = -1;
+  }
+  return before - s.tracks.length;
+}
+
+/** Remove the track at absolute index `idx`. Cursor follows the same
+ *  adjustment rule as dequeueByQids. */
+export function removeTrackAt(guildId: string, idx: number): Track | null {
+  const s = ensure(guildId);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= s.tracks.length) return null;
+  const [removed] = s.tracks.splice(idx, 1);
+  if (idx < s.cursor) s.cursor--;
+  else if (idx === s.cursor) {
+    if (s.cursor >= s.tracks.length) s.cursor = s.tracks.length - 1;
+  }
+  return removed ?? null;
 }
 
 export function setLoop(guildId: string, mode: LoopMode): void {
   ensure(guildId).loop = mode;
 }
 
-/**
- * Turn autoplay on/off for a guild. Turning it off also clears the
- * "last seeded from" marker so re-enabling it later starts fresh.
- */
 export function setAutoplay(guildId: string, on: boolean): void {
   const s = ensure(guildId);
   s.autoplay = on;
   if (!on) s.autoplaySeededFrom = null;
 }
 
-/**
- * Set how many recommendations the autoplay refill enqueues at once.
- * Clamped to [1, MAX_AUTOPLAY_FETCH_COUNT]; returns the value actually
- * stored. Takes effect at the next refill (already-queued recs stay).
- */
 export function setAutoplayFetchCount(guildId: string, n: number): number {
   const clamped = Math.max(
     1,
@@ -257,56 +252,102 @@ export function setAutoplayFetchCount(guildId: string, n: number): number {
   return clamped;
 }
 
+/** True iff peekPrev would return a track (i.e. ⏮ button enabled). */
 export function hasPrevious(guildId: string): boolean {
-  return (states.get(guildId)?.history.length ?? 0) > 0;
+  const s = states.get(guildId);
+  if (!s || s.tracks.length === 0) return false;
+  if (s.loop === "track") return false;
+  if (s.loop === "queue") return s.tracks.length > 1;
+  return s.cursor > 0;
 }
 
-function pushHistory(s: GuildState, track: Track): void {
-  s.history.push(track);
-  if (s.history.length > HISTORY_MAX) {
-    s.history.splice(0, s.history.length - HISTORY_MAX);
+// ── cursor navigation ────────────────────────────────────────────────
+
+/**
+ * Compute the candidate "next" track without moving the cursor.
+ * Caller must `commitCursor(idx)` after a successful play; on failure
+ * the cursor stays where it is (so a play-failed track remains in the
+ * playlist for retry).
+ */
+export function peekNext(
+  guildId: string,
+): { idx: number; track: Track } | null {
+  const s = ensure(guildId);
+  if (s.tracks.length === 0) return null;
+  if (s.cursor < 0) return { idx: 0, track: s.tracks[0] };
+  if (s.loop === "track") {
+    return { idx: s.cursor, track: s.tracks[s.cursor] };
   }
+  const next = s.cursor + 1;
+  if (next < s.tracks.length) return { idx: next, track: s.tracks[next] };
+  // Past the end.
+  if (s.loop === "queue") return { idx: 0, track: s.tracks[0] };
+  return null;
+}
+
+/** Same shape as peekNext, but going backwards. */
+export function peekPrev(
+  guildId: string,
+): { idx: number; track: Track } | null {
+  const s = ensure(guildId);
+  if (s.tracks.length === 0) return null;
+  if (s.loop === "track" && s.cursor >= 0) {
+    return { idx: s.cursor, track: s.tracks[s.cursor] };
+  }
+  const prev = s.cursor - 1;
+  if (prev >= 0) return { idx: prev, track: s.tracks[prev] };
+  if (s.loop === "queue") {
+    const last = s.tracks.length - 1;
+    return { idx: last, track: s.tracks[last] };
+  }
+  return null;
 }
 
 /**
- * Pop the next track per loop-mode rules. Does NOT update s.current —
- * caller must call setCurrent() after confirming playback succeeded.
- * The finishing track is pushed to `history` (unless loop='track').
+ * Commit a peeked navigation: cursor → idx. Should ONLY be called once
+ * voice.play has succeeded for tracks[idx]. Trims the played portion
+ * if it exceeds MAX_PLAYED.
  */
+export function commitCursor(guildId: string, idx: number): void {
+  const s = ensure(guildId);
+  if (idx < 0 || idx >= s.tracks.length) return;
+  s.cursor = idx;
+  if (s.cursor > MAX_PLAYED) {
+    const drop = s.cursor - MAX_PLAYED;
+    s.tracks.splice(0, drop);
+    s.cursor -= drop;
+  }
+}
+
+// ── legacy adapters ──────────────────────────────────────────────────
+// Kept for now-playing.ts / format.ts / playback-actions.ts / web-routes
+// callers that haven't migrated to peek/commit. Each "commits on call"
+// (in contrast to the new peek/commit pattern) so it can't represent a
+// play-failed track without further changes — those callers also use
+// requeueFront() to keep the entry around.
+
+/** Legacy: advance cursor + return new current. Use peekNext/commitCursor
+ *  for the try/play/commit pattern instead. */
 export function advance(guildId: string): Track | null {
-  const s = ensure(guildId);
-  const finished = s.current;
-  if (s.loop === "track" && finished) {
-    return finished;
-  }
-  let next = s.queue.shift() ?? null;
-  if (finished) {
-    pushHistory(s, finished);
-    if (s.loop === "queue") {
-      s.queue.push(finished);
-      // Sole track on queue-loop: the just-pushed `finished` IS the
-      // next track — otherwise we'd "stop" with a non-empty queue.
-      if (next === null) next = s.queue.shift() ?? null;
-    }
-  }
-  s.current = null;
-  return next;
+  const peek = peekNext(guildId);
+  if (!peek) return null;
+  commitCursor(guildId, peek.idx);
+  return peek.track;
 }
 
-/**
- * Step back to the most recently played track. Pops `history`; the
- * track that was playing (if any) is pushed back to the front of the
- * queue so "next" returns to it. Does NOT update s.current — caller
- * must call setCurrent() after confirming playback succeeded. Returns
- * null when there's nothing to go back to.
- */
+/** Legacy: step the cursor backwards + return new current. */
 export function previous(guildId: string): Track | null {
-  const s = ensure(guildId);
-  const prev = s.history.pop() ?? null;
-  if (!prev) return null;
-  if (s.current) s.queue.unshift(s.current);
-  s.current = null;
-  return prev;
+  const peek = peekPrev(guildId);
+  if (!peek) return null;
+  commitCursor(guildId, peek.idx);
+  return peek.track;
+}
+
+/** Legacy no-op: with the cursor model, "current" is derived. Kept as a
+ *  named export so call sites compile until they're migrated; calling it
+ *  does nothing because the cursor was already moved by advance/peek+commit. */
+export function setCurrent(_guildId: string, _track: Track | null): void {
+  // Intentional no-op.
 }
 
 export function reset(guildId: string): void {
@@ -315,31 +356,38 @@ export function reset(guildId: string): void {
 
 /**
  * Drop every reference to a library track (by `trackId`) from all
- * guilds' queue / history / current — called when the track is deleted
- * so a now-missing file doesn't sit ghosted in a queue. When it was the
- * current track, `current` is nulled (the advance loop picks the next).
- * Returns how many references were removed (for logging).
+ * guilds. Adjusts each guild's cursor so it keeps pointing at the same
+ * Track (or to the next remaining item if the cursor's own track was
+ * removed). If purging leaves the session empty, the cursor is reset
+ * and loop falls back to "off" so the advance loop can stop ticking.
  */
 export function purgeTrackId(trackId: string): number {
   let removed = 0;
   for (const s of states.values()) {
-    const beforeQ = s.queue.length;
-    s.queue = s.queue.filter((t) => t.trackId !== trackId);
-    removed += beforeQ - s.queue.length;
-    const beforeH = s.history.length;
-    s.history = s.history.filter((t) => t.trackId !== trackId);
-    removed += beforeH - s.history.length;
-    const beforeP = s.playLog.length;
-    s.playLog = s.playLog.filter((e) => e.track.trackId !== trackId);
-    removed += beforeP - s.playLog.length;
-    if (s.current?.trackId === trackId) {
-      s.current = null;
-      removed += 1;
+    if (s.tracks.length === 0) continue;
+    const before = s.tracks.length;
+    const next: Track[] = [];
+    let removedBeforeCursor = 0;
+    let cursorRemoved = false;
+    for (let i = 0; i < s.tracks.length; i++) {
+      const t = s.tracks[i];
+      if (t.trackId === trackId) {
+        if (i < s.cursor) removedBeforeCursor++;
+        else if (i === s.cursor) cursorRemoved = true;
+        continue;
+      }
+      next.push(t);
     }
-    // If purging emptied this session, drop loop to "off" — otherwise the
-    // advance loop never prunes a loop=track/queue state with nothing to
-    // play and the bot ticks idly forever.
-    if (!s.current && s.queue.length === 0) s.loop = "off";
+    s.tracks = next;
+    s.cursor -= removedBeforeCursor;
+    if (cursorRemoved && s.cursor >= s.tracks.length) {
+      s.cursor = s.tracks.length - 1;
+    }
+    if (s.tracks.length === 0) {
+      s.cursor = -1;
+      s.loop = "off";
+    }
+    removed += before - s.tracks.length;
   }
   return removed;
 }

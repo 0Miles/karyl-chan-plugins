@@ -15,11 +15,11 @@
 import {
   type LoopMode,
   type Track,
-  advance,
-  previous,
-  requeueFront,
+  commitCursor,
+  peekNext,
+  peekPrev,
+  removeTrackAt,
   reset,
-  setCurrent,
 } from "./queue.js";
 import { playTrack } from "./resolver.js";
 
@@ -46,9 +46,9 @@ export type NextResult =
   | { kind: "exhausted" };
 
 /**
- * Advance to the next queued track, skipping past entries that can't be
- * resolved (deleted / private playlist items) — up to a few hops. Asks
- * the bot to stop playback when the queue is empty.
+ * Advance to the next playlist entry, skipping past entries that can't
+ * be resolved (deleted / private playlist items) — up to a few hops.
+ * Asks the bot to stop playback when nothing's left to play.
  */
 export async function doNext(
   guildId: string,
@@ -56,23 +56,25 @@ export async function doNext(
 ): Promise<NextResult> {
   const play = voicePlay(botRpc, guildId);
   for (let attempt = 0; attempt < 5; attempt++) {
-    const next = advance(guildId);
-    if (!next) {
+    const candidate = peekNext(guildId);
+    if (!candidate) {
       await botRpc("/api/plugin/voice.stop", { guild_id: guildId }).catch(
         () => null,
       );
       return { kind: "queue-empty" };
     }
-    const o = await playTrack(next, play);
+    const o = await playTrack(candidate.track, play);
     if (o.ok) {
-      setCurrent(guildId, o.track);
+      commitCursor(guildId, candidate.idx);
       return { kind: "playing", track: o.track };
     }
     if (o.reason === "play-failed") {
-      requeueFront(guildId, next);
-      return { kind: "play-failed", track: next };
+      // Cursor unchanged — the lazy entry stays at its current index
+      // so the caller / next tick can re-attempt with a fresh resolve.
+      return { kind: "play-failed", track: candidate.track };
     }
-    // unresolvable — advance() already dropped it; try the next.
+    // Unresolvable: drop this track from the playlist and try again.
+    removeTrackAt(guildId, candidate.idx);
   }
   return { kind: "exhausted" };
 }
@@ -88,18 +90,20 @@ export async function doPrev(
   guildId: string,
   botRpc: BotRpc,
 ): Promise<PrevResult> {
-  const prev = previous(guildId);
-  if (!prev) return { kind: "no-history" };
-  const o = await playTrack(prev, voicePlay(botRpc, guildId));
+  const candidate = peekPrev(guildId);
+  if (!candidate) return { kind: "no-history" };
+  const o = await playTrack(candidate.track, voicePlay(botRpc, guildId));
   if (o.ok) {
-    setCurrent(guildId, o.track);
+    commitCursor(guildId, candidate.idx);
     return { kind: "playing", track: o.track };
   }
-  // Keep `prev` as current on a transient failure so the history entry
-  // isn't silently lost; a lazy entry that won't resolve at all is dropped
-  // (showing it as "now playing" would lie).
-  if (!prev.needsResolve) setCurrent(guildId, prev);
-  return { kind: "play-failed", track: prev };
+  // Transient failure for a non-lazy entry → still commit so the user
+  // sees their requested prev as "now playing" (the file is fine; the
+  // bot will retry on its next tick). Lazy entries that won't resolve
+  // are left alone — committing to a track we can't actually play would
+  // lie about playback state.
+  if (!candidate.track.needsResolve) commitCursor(guildId, candidate.idx);
+  return { kind: "play-failed", track: candidate.track };
 }
 
 /** Stop playback, clear the queue, leave voice. */

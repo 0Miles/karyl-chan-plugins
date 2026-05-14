@@ -34,14 +34,19 @@ import {
   type LoopMode,
   type Track,
   DEFAULT_AUTOPLAY_FETCH_COUNT,
-  advance,
   clearQueue,
+  commitCursor,
   dequeueAt,
   dequeueByQids,
   enqueue,
+  getCurrent,
+  getPlayed,
   getState,
+  getUpcoming,
+  hasPrevious,
+  peekNext,
+  removeTrackAt,
   setAutoplay,
-  setCurrent,
   setLoop,
 } from "./queue.js";
 import { doNext, doPause, doPrev, doStop } from "./playback-actions.js";
@@ -172,6 +177,9 @@ async function sessionSnapshot(
   // played) traversal that follows.
   const libIndex = new Map<string, LibraryTrack>();
   for (const lt of await listTracks()) libIndex.set(lt.id, lt);
+  const cur = s ? getCurrent(s) : null;
+  const upcoming = s ? getUpcoming(s) : [];
+  const played = s ? getPlayed(s) : [];
   return {
     guildId,
     channelId,
@@ -179,15 +187,23 @@ async function sessionSnapshot(
     loop: s?.loop ?? "off",
     autoplay: s?.autoplay ?? false,
     autoplayFetchCount: s?.autoplayFetchCount ?? DEFAULT_AUTOPLAY_FETCH_COUNT,
-    current: s?.current ? publicTrack(s.current, libIndex) : null,
-    queue: (s?.queue ?? []).map((t) => publicTrack(t, libIndex)),
-    queueLength: s?.queue.length ?? 0,
-    hasPrev: (s?.history.length ?? 0) > 0,
-    // Played this session, recency-ordered (oldest first, distinct).
-    // Each item carries a stable `seq` the WebUI sends to /replay/:seq.
-    played: (s?.playLog ?? []).map((e) => ({
-      ...publicTrack(e.track, libIndex),
-      seq: e.seq,
+    current: cur ? publicTrack(cur, libIndex) : null,
+    // The full ordered playlist + the qid of the cursor's track. New
+    // FE features (drag-reorder, jump-to-track, shuffle) can render off
+    // these and ignore the legacy queue/played split below; current FE
+    // still works against the derived views.
+    playlist: s ? s.tracks.map((t) => publicTrack(t, libIndex)) : [],
+    cursorQid: cur?.qid ?? null,
+    // Legacy split views — derived from the playlist around the cursor.
+    queue: upcoming.map((t) => publicTrack(t, libIndex)),
+    queueLength: upcoming.length,
+    hasPrev: hasPrevious(guildId),
+    // Played this session, oldest-first. (The WebUI's PlayedList already
+    // reverses for newest-first display.) `seq` is the track's qid, which
+    // doubles as the stable id the WebUI's re-queue button addresses by.
+    played: played.map((t) => ({
+      ...publicTrack(t, libIndex),
+      seq: t.qid ?? 0,
     })),
   };
 }
@@ -557,10 +573,14 @@ export async function registerWebRoutes(
     try {
       const snap = await withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
+        // Walk the cursor past `batch.count - 1` tracks without playing
+        // them so the final doNext is the only voice.play of this burst.
+        // peekNext + commitCursor lets us skip safely under any loop
+        // mode (track → no-op; queue → wraps; off → stops at end).
         for (let i = 0; i < batch.count - 1; i++) {
-          const skipped = advance(guildId);
-          if (!skipped) break;
-          setCurrent(guildId, skipped);
+          const peek = peekNext(guildId);
+          if (!peek) break;
+          commitCursor(guildId, peek.idx);
         }
         await doNext(guildId, _botRpc!);
         return syncAndSnapshot(guildId);
@@ -813,8 +833,9 @@ export async function registerWebRoutes(
     },
   );
 
-  // Re-queue one already-played track, identified by its play-log `seq`
-  // (stable across cap eviction / re-order, unlike an array index).
+  // Re-queue one already-played track, identified by its `seq` — which
+  // is the played-portion track's qid (the WebUI sends it back as `seq`
+  // for API compat with the old play-log model).
   server.post<{ Params: { guildId: string; seq: string } }>(
     "/api/session/:guildId/replay/:seq",
     async (request, reply) => {
@@ -823,21 +844,24 @@ export async function registerWebRoutes(
       const seq = Number(request.params.seq);
       return withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
-        const entry = Number.isInteger(seq)
-          ? getState(guildId)?.playLog.find((e) => e.seq === seq)
+        const s = getState(guildId);
+        const found = s && Number.isInteger(seq)
+          ? getPlayed(s).find((t) => t.qid === seq)
           : undefined;
-        if (!entry) {
+        if (!found) {
           return reply
             .code(404)
             .send({ error: "No such played track (refresh and retry)" });
         }
-        enqueue(guildId, { ...entry.track });
+        // Fresh qid on the new entry — it's a separate occurrence in the
+        // playlist (the original played entry stays where it was).
+        enqueue(guildId, { ...found, qid: undefined });
         return syncAndSnapshot(guildId);
       });
     },
   );
 
-  // Re-queue everything played this session, in play-log order (oldest first).
+  // Re-queue everything played this session, in play order (oldest first).
   server.post<{ Params: { guildId: string } }>(
     "/api/session/:guildId/replay-all",
     async (request, reply) => {
@@ -845,8 +869,9 @@ export async function registerWebRoutes(
       if (!authSession(request, reply, guildId)) return;
       return withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
-        for (const e of getState(guildId)?.playLog ?? []) {
-          enqueue(guildId, { ...e.track });
+        const s = getState(guildId);
+        for (const t of s ? getPlayed(s) : []) {
+          enqueue(guildId, { ...t, qid: undefined });
         }
         return syncAndSnapshot(guildId);
       });

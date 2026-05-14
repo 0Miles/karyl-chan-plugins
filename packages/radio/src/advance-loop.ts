@@ -2,11 +2,14 @@ import type { Logger } from "@karyl-chan/plugin-sdk";
 import {
   type GuildState,
   type Track,
-  advance,
+  commitCursor,
   enqueue,
+  getCurrent,
+  getPlayed,
+  getUpcoming,
   getState,
-  requeueFront,
-  setCurrent,
+  peekNext,
+  removeTrackAt,
 } from "./queue.js";
 import {
   playTrack,
@@ -51,7 +54,8 @@ const prefetched = new Map<
 
 /** Ensure the guild's next-up lazy track is being pre-resolved. */
 function ensurePrefetch(guildId: string): void {
-  const head = getState(guildId)?.queue[0];
+  const s = getState(guildId);
+  const head = s ? getUpcoming(s)[0] : undefined;
   if (!head?.needsResolve) {
     prefetched.delete(guildId);
     return;
@@ -67,42 +71,47 @@ function ensurePrefetch(guildId: string): void {
 /** True when this guild has nothing left to play and isn't looping. */
 function isIdle(guildId: string): boolean {
   const s = getState(guildId);
-  return !s || (!s.current && s.queue.length === 0 && s.loop === "off");
+  if (!s) return true;
+  if (s.loop !== "off") return false;
+  // Nothing playing AND nothing upcoming.
+  return !getCurrent(s) && getUpcoming(s).length === 0;
 }
 
 /** Video id to seed autoplay from: the current track's YouTube origin if
  *  it has one, else the most recently played YouTube track this session. */
 function autoplaySeedVideoId(s: GuildState): string | null {
-  const fromCurrent = s.current ? youtubeVideoIdOf(s.current) : null;
+  const cur = getCurrent(s);
+  const fromCurrent = cur ? youtubeVideoIdOf(cur) : null;
   if (fromCurrent) return fromCurrent;
-  for (let i = s.playLog.length - 1; i >= 0; i--) {
-    const id = youtubeVideoIdOf(s.playLog[i].track);
+  const played = getPlayed(s);
+  for (let i = played.length - 1; i >= 0; i--) {
+    const id = youtubeVideoIdOf(played[i]);
     if (id) return id;
   }
   return null;
 }
 
 /**
- * Autoplay: when a guild has `autoplay` on, isn't looping, and the queue
- * is empty, fetch the YouTube "mix" radio seeded from the most recent
- * YouTube track and append up to `autoplayFetchCount` recommendations we
- * haven't already played / queued this session. Refilling only when the
- * queue is *empty* (rather than topping it up) keeps the (slow) yt-dlp
- * mix fetch to roughly one per `autoplayFetchCount` songs. Runs *before*
- * the advance step (so a just-ended track is replaced with no gap).
+ * Autoplay refill: fire-on-last. When `autoplay` is on, loop is "off",
+ * and the cursor is on the last track in the playlist (i.e. there is
+ * nothing upcoming after it), fetch a YouTube "mix" seeded from the
+ * current (or most-recent YouTube) track and append the recommendations.
  *
- * `autoplaySeededFrom` is set to the seed id *before* the fetch so a
- * still-running fetch — or a seed that yields nothing fresh — doesn't
- * re-trigger every tick; the next refill only fires once a *different*
- * track becomes the seed. Errors are swallowed (a yt-dlp hiccup must not
- * break the advance loop).
+ * Triggered from the advance loop's tick whenever the conditions are met
+ * — but `autoplaySeededFrom` records the last seed so a still-running
+ * fetch or a seed that yields nothing fresh doesn't re-fire until a
+ * *different* track becomes the seed. Errors are swallowed so a yt-dlp
+ * hiccup doesn't break the advance loop.
  */
 async function maybeAutoplayRefill(
   guildId: string,
   log: Logger,
 ): Promise<void> {
   const s = getState(guildId);
-  if (!s || !s.autoplay || s.loop !== "off" || s.queue.length > 0) return;
+  if (!s || !s.autoplay || s.loop !== "off") return;
+  // Fire only on the last track — autoplay is "what should play AFTER
+  // this one when there's nothing queued", not "always top up".
+  if (getUpcoming(s).length > 0) return;
   const seedId = autoplaySeedVideoId(s);
   if (!seedId || seedId === s.autoplaySeededFrom) return;
   s.autoplaySeededFrom = seedId;
@@ -119,19 +128,11 @@ async function maybeAutoplayRefill(
     return;
   }
 
-  // Skip the seed itself and anything already played / queued this
+  // Skip the seed itself and anything already in the playlist this
   // session — and don't repeat a video within the same batch.
   const seen = new Set<string>([seedId]);
-  if (s.current) {
-    const id = youtubeVideoIdOf(s.current);
-    if (id) seen.add(id);
-  }
-  for (const e of s.playLog) {
-    const id = youtubeVideoIdOf(e.track);
-    if (id) seen.add(id);
-  }
-  for (const q of s.queue) {
-    const id = youtubeVideoIdOf(q);
+  for (const t of s.tracks) {
+    const id = youtubeVideoIdOf(t);
     if (id) seen.add(id);
   }
   const want = s.autoplayFetchCount;
@@ -219,43 +220,45 @@ async function processGuild(
       } else {
         lastListenerAt.set(guildId, now);
       }
-      // Autoplay: top the queue up with a YouTube recommendation before we
-      // decide what (if anything) to play next, so a just-ended track is
-      // replaced seamlessly and an idle session keeps going.
+      // Autoplay: fire-on-last. If the current track has nothing after
+      // it AND loop=off AND autoplay is on, append fresh recommendations
+      // before the advance below runs. (The check is cheap when nothing
+      // qualifies — autoplaySeededFrom de-bounces real fetches.)
       await maybeAutoplayRefill(guildId, log);
       if (!status.playing) {
-        const next = advance(guildId);
-        if (next) {
+        const candidate = peekNext(guildId);
+        if (candidate) {
           // If we pre-resolved this exact entry while the last track was
           // playing, use that — no fresh yt-dlp call between songs.
           const pf = prefetched.get(guildId);
           prefetched.delete(guildId);
           const hint =
-            next.needsResolve && pf && pf.url === next.url
+            candidate.track.needsResolve && pf && pf.url === candidate.track.url
               ? { resolved: await pf.promise }
               : undefined;
           const outcome = await playTrack(
-            next,
+            candidate.track,
             (url) =>
               botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
             hint,
           );
           if (outcome.ok) {
-            setCurrent(guildId, outcome.track);
+            commitCursor(guildId, candidate.idx);
           } else if (outcome.reason === "play-failed") {
-            // Transient — re-queue the ORIGINAL (lazy) entry so the next
-            // attempt re-resolves with a fresh URL.
-            requeueFront(guildId, next);
-            log.warn("advance: voice.play failed, re-queued for retry", {
+            // Transient — leave the cursor where it was so the next
+            // tick re-attempts the same lazy entry with a fresh resolve.
+            log.warn("advance: voice.play failed, leaving cursor for retry", {
               guildId,
-              url: next.url,
+              url: candidate.track.url,
             });
           } else {
-            // Deleted / private / region-blocked playlist item — drop it
-            // (advance already removed it); next tick continues.
+            // Deleted / private / region-blocked entry — drop it from the
+            // playlist entirely; next tick picks whatever now sits at
+            // cursor+1.
+            removeTrackAt(guildId, candidate.idx);
             log.warn("advance: dropping unplayable track", {
               guildId,
-              url: next.url,
+              url: candidate.track.url,
             });
           }
         }

@@ -14,14 +14,14 @@ import {
   type Track,
   DEFAULT_AUTOPLAY_FETCH_COUNT,
   MAX_AUTOPLAY_FETCH_COUNT,
-  advance,
   clearQueue,
+  commitCursor,
   enqueue,
   getState,
-  requeueFront,
+  peekNext,
+  removeTrackAt,
   setAutoplay,
   setAutoplayFetchCount,
-  setCurrent,
   setLoop,
 } from "./queue.js";
 import { withGuildLock } from "./guild-lock.js";
@@ -850,15 +850,16 @@ export default function buildPlugin() {
                       // Start the first that resolves (skip a few dead ones).
                       let started: Track | null = null;
                       for (let i = 0; i < 5 && !started; i++) {
-                        const next = advance(guildId);
-                        if (!next) break;
-                        const o = await startTrack(ctx, guildId, next);
+                        const candidate = peekNext(guildId);
+                        if (!candidate) break;
+                        const o = await startTrack(ctx, guildId, candidate.track);
                         if (o.ok) {
-                          setCurrent(guildId, o.track);
+                          commitCursor(guildId, candidate.idx);
                           started = o.track;
                         } else if (o.reason === "play-failed") {
-                          requeueFront(guildId, next);
-                          break;
+                          break; // cursor unchanged; advance loop will retry
+                        } else {
+                          removeTrackAt(guildId, candidate.idx);
                         }
                       }
                       await syncNowPlaying(guildId, ctx.botRpc);
@@ -885,8 +886,12 @@ export default function buildPlugin() {
                     // `play` is a fresh start — discard whatever was queued
                     // before (use `/radio queue` to keep & append instead).
                     clearQueue(guildId);
-                    const o = await startTrack(ctx, guildId, resolved);
-                    if (o.ok) setCurrent(guildId, o.track);
+                    enqueue(guildId, resolved);
+                    const candidate = peekNext(guildId);
+                    // candidate is guaranteed (we just enqueued); the `!`
+                    // satisfies the compiler about that invariant.
+                    const o = await startTrack(ctx, guildId, candidate!.track);
+                    if (o.ok) commitCursor(guildId, candidate!.idx);
                     await syncNowPlaying(guildId, ctx.botRpc);
                     return playbackReply(ctx, guildId, {
                       title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",

@@ -5,7 +5,14 @@
  * status / WebUI link the caller passes in).
  */
 import { componentCustomId } from "@karyl-chan/plugin-sdk";
-import { type LoopMode, type Track, getState } from "./queue.js";
+import {
+  type LoopMode,
+  type Track,
+  getCurrent,
+  getState,
+  getUpcoming,
+  hasPrevious,
+} from "./queue.js";
 import { STATIONS, findStation } from "./stations.js";
 
 /** Embed colour shared across the radio plugin's Discord replies. */
@@ -62,11 +69,12 @@ export function formatNowPlaying(
 ): string {
   const s = getState(guildId);
   if (!s) return "_(nothing playing)_\n_queue empty_";
-  const head = s.current
-    ? `🎵 **${s.current.label}**${s.current.queuedBy ? ` _(queued by <@${s.current.queuedBy}>)_` : ""}`
+  const cur = getCurrent(s);
+  const head = cur
+    ? `🎵 **${cur.label}**${cur.queuedBy ? ` _(queued by <@${cur.queuedBy}>)_` : ""}`
     : "_(nothing playing)_";
   const where = channelId ? ` in <#${channelId}>` : "";
-  const queueSize = s.queue.length;
+  const queueSize = getUpcoming(s).length;
   const queueLine =
     queueSize === 0
       ? "_queue empty_"
@@ -77,22 +85,24 @@ export function formatNowPlaying(
 export function formatQueueList(guildId: string): string {
   const s = getState(guildId);
   if (!s) return "**Now:** _(nothing)_\n_(queue empty)_\nLoop: `off`";
+  const cur = getCurrent(s);
+  const upcoming = getUpcoming(s);
   const lines: string[] = [];
   lines.push(
-    s.current
-      ? `**Now:** ${s.current.label}${s.current.queuedBy ? ` (<@${s.current.queuedBy}>)` : ""}`
+    cur
+      ? `**Now:** ${cur.label}${cur.queuedBy ? ` (<@${cur.queuedBy}>)` : ""}`
       : "**Now:** _(nothing)_",
   );
-  if (s.queue.length === 0) {
+  if (upcoming.length === 0) {
     lines.push("_(queue empty)_");
   } else {
-    s.queue.slice(0, 15).forEach((t, i) => {
+    upcoming.slice(0, 15).forEach((t, i) => {
       lines.push(
         `${i + 1}. ${t.label}${t.queuedBy ? ` (<@${t.queuedBy}>)` : ""}`,
       );
     });
-    if (s.queue.length > 15) {
-      lines.push(`… and ${s.queue.length - 15} more`);
+    if (upcoming.length > 15) {
+      lines.push(`… and ${upcoming.length - 15} more`);
     }
   }
   lines.push(`Loop: \`${s.loop}\``);
@@ -120,9 +130,9 @@ export function renderNowPlayingEmbed(
   status: NowPlayingStatus,
 ): Record<string, unknown> {
   const s = getState(guildId);
-  const cur = s?.current ?? null;
+  const cur = s ? getCurrent(s) : null;
   const loop = s?.loop ?? "off";
-  const queueSize = s?.queue.length ?? 0;
+  const queueSize = s ? getUpcoming(s).length : 0;
   const paused = status.paused === true;
 
   const lines: string[] = [];
@@ -167,7 +177,7 @@ export function nowPlayingComponents(
   const s = getState(guildId);
   const loop: LoopMode = s?.loop ?? "off";
   const autoplay = s?.autoplay ?? false;
-  const hasPrev = (s?.history.length ?? 0) > 0;
+  const hasPrev = hasPrevious(guildId);
   const btn = (
     id: string,
     emoji: string,
