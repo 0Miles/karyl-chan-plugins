@@ -274,7 +274,10 @@ watch(
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  color: var(--accent);
+  /* Standard control-button colour — distinct from the accent-tinted
+     ▶ on the cursor row, so the hover affordance reads as a button
+     rather than another playing marker. */
+  color: var(--text);
   font-weight: 600;
   opacity: 0;
   transition: opacity var(--transition-fast);

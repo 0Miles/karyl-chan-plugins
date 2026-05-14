@@ -157,7 +157,7 @@ onUnmounted(() => {
           class="grow"
           placeholder="Add to queue — station key / library title / http(s) URL"
         />
-        <AppButton type="submit">➕ Add</AppButton>
+        <AppButton type="submit">+ Add</AppButton>
       </form>
     </div>
 

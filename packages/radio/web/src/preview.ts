@@ -181,7 +181,7 @@ createApp({
                 class: "grow",
                 placeholder: "Add to queue — preview only",
               }),
-              h(AppButton, { type: "submit" }, () => "➕ Add"),
+              h(AppButton, { type: "submit" }, () => "+ Add"),
             ]),
           ]),
           h(
