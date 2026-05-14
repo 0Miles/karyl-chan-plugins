@@ -148,9 +148,20 @@ watch(
     >
       <span class="drag-handle" title="Drag to reorder" @click.stop>⋮⋮</span>
 
-      <span class="idx" :class="{ 'idx--cursor': isCursor }">
-        {{ isCursor ? "▶" : i + 1 }}
-      </span>
+      <!-- idx slot doubles as the play-this-track affordance on
+           non-cursor rows: number by default, ▶ glyph on hover/focus
+           (matches the cursor row's static ▶ in colour + weight). The
+           cursor row renders a plain span. -->
+      <span v-if="isCursor" class="idx idx--cursor">▶</span>
+      <button
+        v-else
+        type="button"
+        class="idx idx--jump"
+        title="Play this track"
+        @click.stop="emit('jump', t.qid)"
+      >
+        <span class="idx-num">{{ i + 1 }}</span>
+      </button>
 
       <Thumb :src="t.coverUrl" />
 
@@ -162,14 +173,6 @@ watch(
       </div>
 
       <div class="actions">
-        <AppButton
-          v-if="!isCursor"
-          variant="ghost"
-          size="sm"
-          class="row-action row-action--jump"
-          title="Play this track"
-          @click.stop="emit('jump', t.qid)"
-        >▶</AppButton>
         <AppButton
           v-if="!isCursor"
           variant="ghost"
@@ -244,10 +247,49 @@ watch(
   width: 1.6em;
   text-align: right;
   flex-shrink: 0;
+  line-height: 1.2;
 }
 .idx--cursor {
   color: var(--accent);
   font-weight: 600;
+}
+/* Idx slot rendered as a frameless button on non-cursor rows: shows the
+   track number by default, swaps to a ▶ glyph styled identically to the
+   cursor row's static ▶ on row hover / keyboard focus. The ::before
+   carries the ▶ so the number can fade out in-place without a layout
+   shift. */
+.idx--jump {
+  position: relative;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.idx--jump::before {
+  content: "▶";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--accent);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.idx-num {
+  display: inline-block;
+  transition: opacity var(--transition-fast);
+}
+.track-item:hover .idx--jump .idx-num,
+.idx--jump:focus-visible .idx-num {
+  opacity: 0;
+}
+.track-item:hover .idx--jump::before,
+.idx--jump:focus-visible::before {
+  opacity: 1;
 }
 
 .info { min-width: 0; flex: 1; }
@@ -270,9 +312,9 @@ watch(
   gap: 0.35rem;
   flex-shrink: 0;
   align-items: center;
-  /* Two ghost-sm buttons side-by-side: ~3.6rem total. Reserved so a
-     hover-reveal doesn't shift the row's other contents. */
-  min-width: 3.6rem;
+  /* Just the ✕ remove button now (▶ moved to the idx slot). Reserved
+     so a hover-reveal doesn't shift the row's other contents. */
+  min-width: 1.8rem;
   justify-content: flex-end;
 }
 
