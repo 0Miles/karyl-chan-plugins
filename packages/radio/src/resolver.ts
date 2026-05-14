@@ -24,6 +24,7 @@ import {
   resolveMixRecommendations,
   resolvePlaylistEntries,
   resolveStreamUrl,
+  youtubeThumbnailUrl,
   youtubeVideoIdFromUrl,
 } from "./downloader.js";
 import { findBySourceUrl, getTrack, searchTracks } from "./library.js";
@@ -171,14 +172,10 @@ export async function resolveAutoplayRecommendations(
 ): Promise<Track[]> {
   const entries = await resolveMixRecommendations(videoId);
   return entries.map((e) => {
-    // YouTube serves a deterministic per-video-id thumbnail at i.ytimg —
-    // setting it eagerly means the WebUI shows cover art the moment the
-    // refill arrives, without waiting for the per-track playTrack
-    // resolution to fill it in.
+    // Stamp the i.ytimg cover eagerly so the WebUI has art the moment
+    // the refill lands, instead of waiting for playTrack to resolve it.
     const id = youtubeVideoIdFromUrl(e.url);
-    const coverUrl = id
-      ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
-      : undefined;
+    const coverUrl = id ? youtubeThumbnailUrl(id) : undefined;
     return {
       url: e.url,
       label: e.title,

@@ -54,11 +54,10 @@ export interface Track {
   trackId?: string;
   /** Cover image URL (library metadata), for the WebUI now-playing card. */
   coverUrl?: string;
-  /** Where the entry came from — user-queued ("user", the default) or
-   *  appended by the autoplay refill ("autoplay"). Used by the WebUI's
-   *  "Clear ♾️ autoplay" button to wipe AI-added tracks without touching
-   *  the user's own queue. Omitted on legacy tracks → treated as "user". */
-  source?: "user" | "autoplay";
+  /** Set to `"autoplay"` only on entries appended by the autoplay refill,
+   *  so toggling autoplay off can wipe AI-added tracks without touching
+   *  the user's own queue. Absent on user-queued entries. */
+  source?: "autoplay";
   /**
    * The original *page* URL this track was sourced from — a YouTube /
    * SoundCloud / Bandcamp / … page, or a library track's download URL —
@@ -206,22 +205,26 @@ export function dequeueAt(guildId: string, index: number): Track | null {
 }
 
 /**
- * Remove every track whose `qid` is in `qids` regardless of which side
- * of the cursor it's on. Returns count actually removed. Adjusts the
- * cursor so it still points at the same Track (or to the next item, if
- * the cursor track itself was one of the removed qids).
+ * Walk `s.tracks` once, drop everything matching `shouldRemove`, and
+ * keep the cursor anchored to the Track it pointed at. If the cursor
+ * Track itself was dropped, cursor lands on the formerly-next item (or
+ * -1 if the tail was also removed). Returns the number removed.
+ *
+ * The shared filter primitive behind `dequeueByQids`, `purgeTrackId`,
+ * and `setAutoplay(false)`'s wipe.
  */
-export function dequeueByQids(guildId: string, qids: number[]): number {
-  const s = ensure(guildId);
-  if (qids.length === 0 || s.tracks.length === 0) return 0;
-  const want = new Set(qids);
+function filterTracks(
+  s: GuildState,
+  shouldRemove: (t: Track, i: number) => boolean,
+): number {
+  if (s.tracks.length === 0) return 0;
   const before = s.tracks.length;
   const next: Track[] = [];
   let removedBeforeCursor = 0;
   let cursorRemoved = false;
   for (let i = 0; i < s.tracks.length; i++) {
     const t = s.tracks[i];
-    if (t.qid !== undefined && want.has(t.qid)) {
+    if (shouldRemove(t, i)) {
       if (i < s.cursor) removedBeforeCursor++;
       else if (i === s.cursor) cursorRemoved = true;
       continue;
@@ -230,14 +233,24 @@ export function dequeueByQids(guildId: string, qids: number[]): number {
   }
   s.tracks = next;
   s.cursor -= removedBeforeCursor;
-  // If the cursor track was removed, leave cursor pointing at what's
-  // now at that index (effectively the formerly-next track). If the
-  // tail was also removed, clamp to -1.
   if (cursorRemoved) {
     if (s.cursor >= s.tracks.length) s.cursor = s.tracks.length - 1;
     if (s.cursor < 0) s.cursor = -1;
   }
   return before - s.tracks.length;
+}
+
+/**
+ * Remove every track whose `qid` is in `qids` regardless of which side
+ * of the cursor it's on. Returns count actually removed.
+ */
+export function dequeueByQids(guildId: string, qids: number[]): number {
+  if (qids.length === 0) return 0;
+  const want = new Set(qids);
+  return filterTracks(
+    ensure(guildId),
+    (t) => t.qid !== undefined && want.has(t.qid),
+  );
 }
 
 /** Remove the track at absolute index `idx`. Cursor follows the same
@@ -270,24 +283,10 @@ export function setAutoplay(guildId: string, on: boolean): void {
   }
 }
 
-/** Internal: clearAutoplay against an already-resolved state. The
- *  exported wrapper resolves the state and forwards. */
+/** Wipes autoplay-sourced tracks while preserving the cursor row (so
+ *  mid-play audio isn't yanked when autoplay is toggled off). */
 function clearAutoplayUnlocked(s: GuildState): number {
-  if (s.tracks.length === 0) return 0;
-  const before = s.tracks.length;
-  const next: Track[] = [];
-  let removedBeforeCursor = 0;
-  for (let i = 0; i < s.tracks.length; i++) {
-    const t = s.tracks[i];
-    if (t.source === "autoplay" && i !== s.cursor) {
-      if (i < s.cursor) removedBeforeCursor++;
-      continue;
-    }
-    next.push(t);
-  }
-  s.tracks = next;
-  s.cursor -= removedBeforeCursor;
-  return before - s.tracks.length;
+  return filterTracks(s, (t, i) => t.source === "autoplay" && i !== s.cursor);
 }
 
 export function setAutoplayFetchCount(guildId: string, n: number): number {
@@ -478,30 +477,10 @@ export function reset(guildId: string): void {
 export function purgeTrackId(trackId: string): number {
   let removed = 0;
   for (const s of states.values()) {
-    if (s.tracks.length === 0) continue;
-    const before = s.tracks.length;
-    const next: Track[] = [];
-    let removedBeforeCursor = 0;
-    let cursorRemoved = false;
-    for (let i = 0; i < s.tracks.length; i++) {
-      const t = s.tracks[i];
-      if (t.trackId === trackId) {
-        if (i < s.cursor) removedBeforeCursor++;
-        else if (i === s.cursor) cursorRemoved = true;
-        continue;
-      }
-      next.push(t);
-    }
-    s.tracks = next;
-    s.cursor -= removedBeforeCursor;
-    if (cursorRemoved && s.cursor >= s.tracks.length) {
-      s.cursor = s.tracks.length - 1;
-    }
-    if (s.tracks.length === 0) {
-      s.cursor = -1;
-      s.loop = "off";
-    }
-    removed += before - s.tracks.length;
+    removed += filterTracks(s, (t) => t.trackId === trackId);
+    // Purging the whole session: drop loop too so the advance loop can
+    // stop ticking once the queue is empty.
+    if (s.tracks.length === 0) s.loop = "off";
   }
   return removed;
 }

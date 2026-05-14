@@ -267,10 +267,8 @@ async function processGuild(
             });
           }
         } else {
-          // Track ended (or never started past the last one) with
-          // nothing to advance to — autoplay above already had its shot
-          // and didn't refill. Mark the session finished so isIdle below
-          // catches it and tears down rather than ticking forever.
+          // Nothing to advance to and autoplay didn't refill — mark
+          // done so isIdle below tears the session down.
           endSession(guildId);
         }
       }

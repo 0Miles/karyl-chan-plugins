@@ -391,6 +391,13 @@ export function youtubeVideoIdFromUrl(s: string): string | null {
   return youtubeVideoId(u);
 }
 
+/** Deterministic YouTube cover-art URL for `videoId`. Every video id has
+ *  a `hqdefault.jpg` served from i.ytimg, so callers can stamp this
+ *  eagerly without a per-track network call. */
+export function youtubeThumbnailUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+}
+
 /**
  * Canonicalize a source URL for de-duplication. YouTube links (any of
  * the watch / youtu.be / embed / shorts / music forms, with or without
