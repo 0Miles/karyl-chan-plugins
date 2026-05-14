@@ -1,16 +1,20 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import AppButton from "./AppButton.vue";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
 import { trackMeta } from "../composables/use-format";
 import type { Track } from "../types";
 
-defineProps<{
+const props = defineProps<{
   queue: Track[];
   pendingAdds: string[];
+  /** qids the user has clicked ✕ on; rendered as locally-hidden so the
+   *  list reacts immediately even before the server confirms. */
+  pendingRemoveQids: Set<number>;
 }>();
 
-defineEmits<{ (e: "dequeue", index: number): void }>();
+defineEmits<{ (e: "dequeue", qid: number): void }>();
 
 function sub(t: Track): string {
   const meta = trackMeta(t);
@@ -18,14 +22,29 @@ function sub(t: Track): string {
   const queued = who ? "queued by " + who : "";
   return [meta, queued].filter(Boolean).join(" · ");
 }
+
+// Filter out items the user has clicked ✕ on — the parent will
+// re-include them only if the server reports them back (e.g. on error).
+const visibleQueue = computed(() =>
+  props.queue.filter(
+    (t) => t.qid === undefined || !props.pendingRemoveQids.has(t.qid),
+  ),
+);
 </script>
 
 <template>
   <ul class="list">
-    <li v-if="queue.length === 0 && pendingAdds.length === 0" class="empty">
+    <li
+      v-if="visibleQueue.length === 0 && pendingAdds.length === 0"
+      class="empty"
+    >
       Queue is empty.
     </li>
-    <li v-for="(t, i) in queue" :key="i" class="item">
+    <li
+      v-for="(t, i) in visibleQueue"
+      :key="t.qid ?? 'idx-' + i"
+      class="item"
+    >
       <span class="idx">{{ i + 1 }}.</span>
       <Thumb :src="t.coverUrl" />
       <div class="info">
@@ -35,7 +54,13 @@ function sub(t: Track): string {
         <div class="dim" v-if="sub(t)">{{ sub(t) }}</div>
       </div>
       <div class="actions">
-        <AppButton variant="ghost" size="sm" title="Remove" @click="$emit('dequeue', i)">✕</AppButton>
+        <AppButton
+          variant="ghost"
+          size="sm"
+          title="Remove"
+          :disabled="t.qid === undefined"
+          @click="t.qid !== undefined && $emit('dequeue', t.qid)"
+        >✕</AppButton>
       </div>
     </li>
     <li v-for="src in pendingAdds" :key="'p-' + src" class="item pending">

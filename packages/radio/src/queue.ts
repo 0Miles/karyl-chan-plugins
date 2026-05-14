@@ -32,6 +32,15 @@ export type LoopMode = "off" | "track" | "queue";
 export interface Track {
   url: string;
   label: string;
+  /**
+   * Stable queue-entry id assigned by enqueue(). The WebUI uses this as
+   * a v-for key and as the identifier in POST /api/session/<g>/dequeue
+   * so per-item removals don't depend on volatile array indices (which
+   * shift under concurrent dequeues / auto-advance). Set on every queue
+   * push; persists onto current / history / playLog when the track
+   * leaves the queue but is meaningful only while it's still in queue.
+   */
+  qid?: number;
   /** Discord user id who queued it (for "queued by" mentions in Discord). */
   queuedBy: string | null;
   /**
@@ -175,13 +184,18 @@ export function setCurrent(guildId: string, track: Track | null): void {
   }
 }
 
+let nextQid = 1;
+
 export function enqueue(guildId: string, track: Track): number {
   const s = ensure(guildId);
+  if (track.qid === undefined) track.qid = nextQid++;
   s.queue.push(track);
   return s.queue.length;
 }
 
 export function requeueFront(guildId: string, track: Track): void {
+  // Retain the existing qid when a play-failed track is pushed back —
+  // the WebUI is still showing it under that key.
   ensure(guildId).queue.unshift(track);
 }
 
@@ -196,6 +210,23 @@ export function dequeueAt(guildId: string, index: number): Track | null {
     return null;
   }
   return s.queue.splice(index, 1)[0] ?? null;
+}
+
+/**
+ * Remove every queue entry whose `qid` is in `qids`. Returns the count
+ * of entries actually removed (entries already gone — e.g. the
+ * auto-advance loop picked them up, or a previous dequeue already took
+ * them — are silently skipped). Batched so a UI burst of "remove these"
+ * lands as a single splice pass + one Discord message sync, instead of
+ * N sequential locks each doing their own sync.
+ */
+export function dequeueByQids(guildId: string, qids: number[]): number {
+  const s = ensure(guildId);
+  if (qids.length === 0) return 0;
+  const want = new Set(qids);
+  const before = s.queue.length;
+  s.queue = s.queue.filter((t) => !(t.qid !== undefined && want.has(t.qid)));
+  return before - s.queue.length;
 }
 
 export function setLoop(guildId: string, mode: LoopMode): void {

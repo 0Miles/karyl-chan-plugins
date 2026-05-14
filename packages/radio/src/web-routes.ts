@@ -37,6 +37,7 @@ import {
   advance,
   clearQueue,
   dequeueAt,
+  dequeueByQids,
   enqueue,
   getState,
   setAutoplay,
@@ -140,6 +141,7 @@ function publicTrack(
     queuedBy: t.queuedBy,
     ...(t.queuedByName ? { queuedByName: t.queuedByName } : {}),
     ...(t.trackId ? { trackId: t.trackId } : {}),
+    ...(t.qid !== undefined ? { qid: t.qid } : {}),
     ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
     ...(sourceUrl ? { sourceUrl } : {}),
     ...(lib?.author ? { author: lib.author } : {}),
@@ -760,6 +762,40 @@ export async function registerWebRoutes(
         const removed = dequeueAt(guildId, idx);
         if (!removed)
           return reply.code(404).send({ error: "No such queue item" });
+        return syncAndSnapshot(guildId);
+      });
+    },
+  );
+
+  // Batch dequeue: { qids: number[] }. The WebUI debounces rapid ✕
+  // clicks into one window and hits this once, so even removing 10
+  // items costs one bot RPC pair (status + Discord message edit)
+  // instead of N. Unknown qids are silently no-op — the auto-advance
+  // loop or another caller may have already removed them.
+  server.post<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/dequeue",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      if (!authSession(request, reply, guildId)) return;
+      let body: { qids?: unknown };
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { qids?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      const raw = body?.qids;
+      if (!Array.isArray(raw))
+        return reply.code(400).send({ error: "qids must be an array" });
+      const qids: number[] = [];
+      for (const v of raw) {
+        if (typeof v === "number" && Number.isInteger(v) && v > 0) qids.push(v);
+      }
+      return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        dequeueByQids(guildId, qids);
         return syncAndSnapshot(guildId);
       });
     },

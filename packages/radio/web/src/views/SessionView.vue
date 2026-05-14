@@ -15,10 +15,70 @@ const snap = ref<SessionSnapshot | null>(null);
 const pendingAdds = ref<string[]>([]);
 const addText = ref("");
 
+// qids the user has clicked ✕ on but the server hasn't confirmed yet —
+// QueueList hides them locally. Vue auto-unwraps refs across the prop
+// boundary, so mutating the Set in-place doesn't trigger child reactivity;
+// we replace the Set reference on every change (the set rarely exceeds a
+// handful of entries, so the copy is cheap).
+const pendingRemoveQids = ref<Set<number>>(new Set());
+
+function addPendingQid(qid: number): void {
+  const next = new Set(pendingRemoveQids.value);
+  next.add(qid);
+  pendingRemoveQids.value = next;
+}
+function dropPendingQids(qids: Iterable<number>): void {
+  const next = new Set(pendingRemoveQids.value);
+  for (const q of qids) next.delete(q);
+  pendingRemoveQids.value = next;
+}
+
 const sessionPath = (suffix = "") =>
   "/api/session/" + encodeURIComponent(props.guildId) + suffix;
 
 let timer: number | undefined;
+
+// Coalesce a burst of ✕ clicks into a single batched POST /dequeue.
+let removeBatch: number[] = [];
+let removeFlushTimer: number | undefined;
+const DEQUEUE_FLUSH_MS = 90;
+
+function scheduleDequeue(qid: number): void {
+  // Optimistically hide it right away.
+  addPendingQid(qid);
+  if (!removeBatch.includes(qid)) removeBatch.push(qid);
+  if (removeFlushTimer !== undefined) window.clearTimeout(removeFlushTimer);
+  removeFlushTimer = window.setTimeout(flushDequeue, DEQUEUE_FLUSH_MS);
+}
+
+async function flushDequeue(): Promise<void> {
+  removeFlushTimer = undefined;
+  const qids = removeBatch;
+  removeBatch = [];
+  if (qids.length === 0) return;
+  try {
+    snap.value = await api<SessionSnapshot>(
+      "POST",
+      sessionPath("/dequeue"),
+      { qids },
+    );
+  } catch (e: any) {
+    error(e.message);
+    // Roll back the optimistic hide so the failed entries reappear.
+    await refresh();
+  } finally {
+    // Whatever the server now reports is canonical — clear the pending
+    // entries whose qids are no longer in the live queue.
+    if (snap.value) {
+      const present = new Set(
+        snap.value.queue
+          .map((t) => t.qid)
+          .filter((q): q is number => q !== undefined),
+      );
+      dropPendingQids(qids.filter((q) => !present.has(q)));
+    }
+  }
+}
 
 async function refresh() {
   try {
@@ -105,7 +165,8 @@ onUnmounted(() => {
       <QueueList
         :queue="snap.queue"
         :pending-adds="pendingAdds"
-        @dequeue="(i: number) => act('POST', sessionPath('/dequeue/' + i))"
+        :pending-remove-qids="pendingRemoveQids"
+        @dequeue="scheduleDequeue"
       />
     </section>
 
