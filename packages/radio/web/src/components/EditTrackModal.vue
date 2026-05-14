@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import AppButton from "./AppButton.vue";
 import AppModal from "./AppModal.vue";
 import { api, apiUpload } from "../api";
@@ -22,10 +22,21 @@ const title = ref("");
 const author = ref("");
 const album = ref("");
 const coverUrl = ref("");
+/** Local file selected for upload — staged until Save (no standalone upload button). */
 const coverFile = ref<File | null>(null);
+/** Object URL for the staged file; revoked when replaced or on unmount. */
+const localPreview = ref<string | null>(null);
 const saving = ref(false);
-const uploading = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+
+const previewSrc = computed(() => localPreview.value || coverUrl.value || "");
+
+function clearLocalPreview() {
+  if (localPreview.value) {
+    URL.revokeObjectURL(localPreview.value);
+    localPreview.value = null;
+  }
+}
 
 watch(
   () => props.track,
@@ -36,36 +47,35 @@ watch(
     album.value = t.album || "";
     coverUrl.value = t.coverUrl || "";
     coverFile.value = null;
+    clearLocalPreview();
     if (fileInput.value) fileInput.value.value = "";
   },
 );
 
-function onFile(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0] ?? null;
-  coverFile.value = f;
+onBeforeUnmount(clearLocalPreview);
+
+function pickFile() {
+  fileInput.value?.click();
 }
 
-async function uploadCover() {
-  const t = props.track;
-  if (!t) return;
-  if (!coverFile.value) {
-    error("Pick an image file first");
+function onFile(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+  if (!f) return;
+  if (f.size > 5 * 1024 * 1024) {
+    error("Image must be ≤ 5 MB");
+    if (fileInput.value) fileInput.value.value = "";
     return;
   }
-  uploading.value = true;
-  try {
-    const r = await apiUpload<{ track?: LibraryTrack }>(
-      `/api/tracks/${encodeURIComponent(t.id)}/cover`,
-      coverFile.value,
-    );
-    if (r?.track?.coverUrl) coverUrl.value = r.track.coverUrl;
-    ok("Cover uploaded");
-    emit("saved");
-  } catch (e: any) {
-    error(e.message);
-  } finally {
-    uploading.value = false;
-  }
+  clearLocalPreview();
+  coverFile.value = f;
+  localPreview.value = URL.createObjectURL(f);
+}
+
+function removeCover() {
+  coverFile.value = null;
+  coverUrl.value = "";
+  clearLocalPreview();
+  if (fileInput.value) fileInput.value.value = "";
 }
 
 async function save() {
@@ -73,12 +83,28 @@ async function save() {
   if (!t) return;
   saving.value = true;
   try {
-    await api("PATCH", `/api/tracks/${encodeURIComponent(t.id)}`, {
-      title: title.value,
-      author: author.value,
-      album: album.value,
-      coverUrl: coverUrl.value,
-    });
+    // If the user staged a file, upload it first — server saves to disk
+    // and sets coverUrl to the served /cover/<id>.<ext> path. Then PATCH
+    // the remaining metadata (omitting coverUrl so we don't overwrite
+    // the freshly-uploaded URL with whatever was in the input field).
+    if (coverFile.value) {
+      await apiUpload(
+        `/api/tracks/${encodeURIComponent(t.id)}/cover`,
+        coverFile.value,
+      );
+      await api("PATCH", `/api/tracks/${encodeURIComponent(t.id)}`, {
+        title: title.value,
+        author: author.value,
+        album: album.value,
+      });
+    } else {
+      await api("PATCH", `/api/tracks/${encodeURIComponent(t.id)}`, {
+        title: title.value,
+        author: author.value,
+        album: album.value,
+        coverUrl: coverUrl.value,
+      });
+    }
     ok("Saved");
     emit("saved");
     emit("close");
@@ -105,25 +131,50 @@ async function save() {
         <label>Album</label>
         <input v-model="album" />
       </div>
+
       <div class="field">
-        <label>Cover image URL</label>
-        <input v-model="coverUrl" placeholder="https://… (or upload below)" />
-      </div>
-      <div class="field">
-        <label>Upload cover image (jpg / png / webp / gif, ≤ 5 MB)</label>
-        <div class="row">
+        <label>Cover image</label>
+        <div class="cover-row">
+          <button
+            type="button"
+            class="cover-preview"
+            :title="coverFile ? coverFile.name : 'Click to pick a new image'"
+            @click="pickFile"
+          >
+            <img v-if="previewSrc" :src="previewSrc" alt="" />
+            <span v-else class="cover-placeholder">🎵</span>
+            <span class="cover-hover-hint">Pick file</span>
+          </button>
+          <div class="cover-controls">
+            <input
+              v-model="coverUrl"
+              :disabled="!!coverFile"
+              :placeholder="
+                coverFile
+                  ? '(file ready to upload on save)'
+                  : 'https://… image URL'
+              "
+            />
+            <div class="cover-help">
+              <span>jpg / png / webp / gif · ≤ 5 MB</span>
+              <button
+                v-if="coverFile || coverUrl"
+                type="button"
+                class="cover-clear"
+                @click="removeCover"
+              >Remove cover</button>
+            </div>
+          </div>
           <input
             ref="fileInput"
             type="file"
-            class="grow"
+            class="cover-file-hidden"
             accept="image/jpeg,image/png,image/webp,image/gif"
             @change="onFile"
           />
-          <AppButton variant="ghost" :loading="uploading" @click="uploadCover">
-            ⬆ Upload
-          </AppButton>
         </div>
       </div>
+
       <div class="foot">
         <AppButton variant="ghost" @click="emit('close')">Cancel</AppButton>
         <AppButton type="submit" :loading="saving">Save</AppButton>
@@ -146,4 +197,88 @@ async function save() {
   gap: 0.5rem;
   margin-top: 0.25rem;
 }
+
+.cover-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.cover-preview {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface-2);
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--transition-fast);
+}
+.cover-preview:hover { border-color: var(--accent); }
+.cover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cover-placeholder {
+  color: var(--text-faint);
+  font-size: 2rem;
+}
+.cover-hover-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 550;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+}
+.cover-preview:hover .cover-hover-hint,
+.cover-preview:focus-visible .cover-hover-hint {
+  opacity: 1;
+}
+
+.cover-controls {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.cover-controls input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.cover-help {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.cover-clear {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+.cover-clear:hover { text-decoration: underline; }
+
+.cover-file-hidden { display: none; }
 </style>
