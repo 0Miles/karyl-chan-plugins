@@ -285,6 +285,57 @@ export function peekNext(
   return null;
 }
 
+/** Locate a track by `qid`; returns idx + track or null. The "candidate"
+ *  shape matches peekNext / peekPrev so callers can plug it into the
+ *  same playTrack → commitCursor pattern. */
+export function peekQid(
+  guildId: string,
+  qid: number,
+): { idx: number; track: Track } | null {
+  const s = ensure(guildId);
+  const idx = s.tracks.findIndex((t) => t.qid === qid);
+  return idx === -1 ? null : { idx, track: s.tracks[idx] };
+}
+
+/**
+ * Move the track with `qid` so it sits immediately before the track
+ * with `beforeQid`. `beforeQid === null` moves it to the very end.
+ * Returns true on success, false if `qid` (or `beforeQid` when given)
+ * couldn't be found. The cursor stays anchored to whichever Track was
+ * currently playing (the cursor's qid).
+ */
+export function reorderByQid(
+  guildId: string,
+  qid: number,
+  beforeQid: number | null,
+): boolean {
+  const s = ensure(guildId);
+  const from = s.tracks.findIndex((t) => t.qid === qid);
+  if (from === -1) return false;
+  // No-op move onto itself.
+  if (beforeQid === qid) return true;
+  // Remember the currently-playing track's qid so we can re-find the
+  // cursor after the splice (its index will have shifted).
+  const cursorQid = s.cursor >= 0 ? s.tracks[s.cursor].qid : null;
+  let to: number;
+  if (beforeQid === null) {
+    to = s.tracks.length; // splice-target index when appending
+  } else {
+    to = s.tracks.findIndex((t) => t.qid === beforeQid);
+    if (to === -1) return false;
+  }
+  const [moved] = s.tracks.splice(from, 1);
+  // Splicing OUT shifts the target index left by one if it was after.
+  if (to > from) to--;
+  s.tracks.splice(to, 0, moved);
+  // Restore the cursor onto the track that was current before the move.
+  if (cursorQid !== null) {
+    const newCursor = s.tracks.findIndex((t) => t.qid === cursorQid);
+    if (newCursor !== -1) s.cursor = newCursor;
+  }
+  return true;
+}
+
 /** Same shape as peekNext, but going backwards. */
 export function peekPrev(
   guildId: string,

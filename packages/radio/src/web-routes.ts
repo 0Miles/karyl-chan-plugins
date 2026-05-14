@@ -40,16 +40,19 @@ import {
   dequeueByQids,
   enqueue,
   getCurrent,
-  getPlayed,
   getState,
-  getUpcoming,
-  hasPrevious,
   peekNext,
-  removeTrackAt,
+  reorderByQid,
   setAutoplay,
   setLoop,
 } from "./queue.js";
-import { doNext, doPause, doPrev, doStop } from "./playback-actions.js";
+import {
+  doJump,
+  doNext,
+  doPause,
+  doPrev,
+  doStop,
+} from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import {
@@ -178,8 +181,6 @@ async function sessionSnapshot(
   const libIndex = new Map<string, LibraryTrack>();
   for (const lt of await listTracks()) libIndex.set(lt.id, lt);
   const cur = s ? getCurrent(s) : null;
-  const upcoming = s ? getUpcoming(s) : [];
-  const played = s ? getPlayed(s) : [];
   return {
     guildId,
     channelId,
@@ -187,24 +188,11 @@ async function sessionSnapshot(
     loop: s?.loop ?? "off",
     autoplay: s?.autoplay ?? false,
     autoplayFetchCount: s?.autoplayFetchCount ?? DEFAULT_AUTOPLAY_FETCH_COUNT,
-    current: cur ? publicTrack(cur, libIndex) : null,
-    // The full ordered playlist + the qid of the cursor's track. New
-    // FE features (drag-reorder, jump-to-track, shuffle) can render off
-    // these and ignore the legacy queue/played split below; current FE
-    // still works against the derived views.
+    // The full ordered playlist + the qid of the cursor's track. The
+    // FE renders played / current / upcoming by partitioning this list
+    // around cursorQid — no separate queue / played arrays needed.
     playlist: s ? s.tracks.map((t) => publicTrack(t, libIndex)) : [],
     cursorQid: cur?.qid ?? null,
-    // Legacy split views — derived from the playlist around the cursor.
-    queue: upcoming.map((t) => publicTrack(t, libIndex)),
-    queueLength: upcoming.length,
-    hasPrev: hasPrevious(guildId),
-    // Played this session, oldest-first. (The WebUI's PlayedList already
-    // reverses for newest-first display.) `seq` is the track's qid, which
-    // doubles as the stable id the WebUI's re-queue button addresses by.
-    played: played.map((t) => ({
-      ...publicTrack(t, libIndex),
-      seq: t.qid ?? 0,
-    })),
   };
 }
 
@@ -833,46 +821,79 @@ export async function registerWebRoutes(
     },
   );
 
-  // Re-queue one already-played track, identified by its `seq` — which
-  // is the played-portion track's qid (the WebUI sends it back as `seq`
-  // for API compat with the old play-log model).
-  server.post<{ Params: { guildId: string; seq: string } }>(
-    "/api/session/:guildId/replay/:seq",
+  // Jump the cursor onto any track in the playlist by qid. The user
+  // clicked a played track to step back, or an upcoming track to skip
+  // ahead — both are the same operation against the unified playlist.
+  server.post<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/jump",
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      const seq = Number(request.params.seq);
+      let body: { qid?: unknown };
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { qid?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      const qid = body?.qid;
+      if (typeof qid !== "number" || !Number.isInteger(qid) || qid <= 0) {
+        return reply.code(400).send({ error: "qid must be a positive integer" });
+      }
       return withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
-        const s = getState(guildId);
-        const found = s && Number.isInteger(seq)
-          ? getPlayed(s).find((t) => t.qid === seq)
-          : undefined;
-        if (!found) {
-          return reply
-            .code(404)
-            .send({ error: "No such played track (refresh and retry)" });
-        }
-        // Fresh qid on the new entry — it's a separate occurrence in the
-        // playlist (the original played entry stays where it was).
-        enqueue(guildId, { ...found, qid: undefined });
+        if (!_botRpc)
+          return reply.code(503).send({ error: "bot RPC unavailable" });
+        const r = await doJump(guildId, qid, _botRpc);
+        if (r.kind === "no-such-qid")
+          return reply.code(404).send({ error: "No such track (refresh and retry)" });
         return syncAndSnapshot(guildId);
       });
     },
   );
 
-  // Re-queue everything played this session, in play order (oldest first).
+  // Drag-reorder: move `qid` to immediately before `beforeQid` (or to
+  // the end when beforeQid is null). The currently-playing track keeps
+  // playing — the cursor anchors to its qid through the move.
   server.post<{ Params: { guildId: string } }>(
-    "/api/session/:guildId/replay-all",
+    "/api/session/:guildId/reorder",
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
+      let body: { qid?: unknown; beforeQid?: unknown };
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { qid?: unknown; beforeQid?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      const qid = body?.qid;
+      const beforeQid = body?.beforeQid;
+      if (typeof qid !== "number" || !Number.isInteger(qid) || qid <= 0) {
+        return reply.code(400).send({ error: "qid must be a positive integer" });
+      }
+      const before =
+        beforeQid === null || beforeQid === undefined
+          ? null
+          : typeof beforeQid === "number" &&
+              Number.isInteger(beforeQid) &&
+              beforeQid > 0
+            ? beforeQid
+            : NaN;
+      if (Number.isNaN(before)) {
+        return reply
+          .code(400)
+          .send({ error: "beforeQid must be a positive integer or null" });
+      }
       return withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
-        const s = getState(guildId);
-        for (const t of s ? getPlayed(s) : []) {
-          enqueue(guildId, { ...t, qid: undefined });
-        }
+        const ok = reorderByQid(guildId, qid, before);
+        if (!ok)
+          return reply.code(404).send({ error: "Unknown qid (refresh and retry)" });
         return syncAndSnapshot(guildId);
       });
     },

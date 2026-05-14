@@ -18,6 +18,7 @@ import {
   commitCursor,
   peekNext,
   peekPrev,
+  peekQid,
   removeTrackAt,
   reset,
 } from "./queue.js";
@@ -102,6 +103,34 @@ export async function doPrev(
   // bot will retry on its next tick). Lazy entries that won't resolve
   // are left alone — committing to a track we can't actually play would
   // lie about playback state.
+  if (!candidate.track.needsResolve) commitCursor(guildId, candidate.idx);
+  return { kind: "play-failed", track: candidate.track };
+}
+
+export type JumpResult =
+  | { kind: "playing"; track: Track }
+  | { kind: "play-failed"; track: Track }
+  | { kind: "no-such-qid" };
+
+/**
+ * Jump the cursor onto a specific qid (forward or backward in the
+ * playlist). Same try-play-commit pattern as doNext / doPrev: only
+ * commit the cursor on a successful voice.play; on a transient failure
+ * leave the cursor where it was; on an unresolvable lazy entry, drop
+ * it and report failure (the caller will refresh & try elsewhere).
+ */
+export async function doJump(
+  guildId: string,
+  qid: number,
+  botRpc: BotRpc,
+): Promise<JumpResult> {
+  const candidate = peekQid(guildId, qid);
+  if (!candidate) return { kind: "no-such-qid" };
+  const o = await playTrack(candidate.track, voicePlay(botRpc, guildId));
+  if (o.ok) {
+    commitCursor(guildId, candidate.idx);
+    return { kind: "playing", track: o.track };
+  }
   if (!candidate.track.needsResolve) commitCursor(guildId, candidate.idx);
   return { kind: "play-failed", track: candidate.track };
 }

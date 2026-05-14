@@ -1,11 +1,23 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import AppButton from "./AppButton.vue";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
-import type { SessionSnapshot } from "../types";
-import { loopBadge, nextLoop, autoplayBadge, trackMeta } from "../composables/use-format";
+import type { SessionSnapshot, Track } from "../types";
+import {
+  autoplayBadge,
+  loopBadge,
+  nextLoop,
+  trackMeta,
+} from "../composables/use-format";
 
-defineProps<{ snap: SessionSnapshot }>();
+const props = defineProps<{
+  snap: SessionSnapshot;
+  /** Optional override for the current track (SessionView pre-computes
+   *  it once for cheaper rendering). When omitted we derive from the
+   *  snapshot's playlist + cursorQid. */
+  current?: Track | null;
+}>();
 
 const emit = defineEmits<{
   (e: "prev"): void;
@@ -16,30 +28,50 @@ const emit = defineEmits<{
   (e: "autoplay", on: boolean): void;
 }>();
 
-function onLoop(snap: SessionSnapshot) {
-  emit("loop", nextLoop(snap.loop));
+const cur = computed<Track | null>(() => {
+  if (props.current !== undefined) return props.current;
+  if (props.snap.cursorQid === null) return null;
+  return (
+    props.snap.playlist.find((t) => t.qid === props.snap.cursorQid) ?? null
+  );
+});
+
+// ⏮ enabled when a "previous" step would land on a real track:
+//   loop=track  → false (prev = same track)
+//   loop=queue  → true whenever the playlist has >= 2 tracks (wraps)
+//   loop=off    → true when there's something played before the cursor
+const hasPrev = computed<boolean>(() => {
+  const s = props.snap;
+  if (s.cursorQid === null) return false;
+  if (s.loop === "track") return false;
+  if (s.loop === "queue") return s.playlist.length > 1;
+  return s.playlist.findIndex((t) => t.qid === s.cursorQid) > 0;
+});
+
+function onLoop() {
+  emit("loop", nextLoop(props.snap.loop));
 }
 </script>
 
 <template>
   <div class="card">
     <div class="np">
-      <Thumb :src="snap.current?.coverUrl" size="lg" />
+      <Thumb :src="cur?.coverUrl" size="lg" />
       <div class="np-meta">
         <div class="np-title">
           <TrackLink
-            v-if="snap.current"
-            :label="snap.current.label"
-            :url="snap.current.sourceUrl"
+            v-if="cur"
+            :label="cur.label"
+            :url="cur.sourceUrl"
           />
           <span v-else class="muted">Nothing playing</span>
         </div>
-        <div v-if="snap.current && trackMeta(snap.current)" class="np-info">
-          {{ trackMeta(snap.current) }}
+        <div v-if="cur && trackMeta(cur)" class="np-info">
+          {{ trackMeta(cur) }}
         </div>
         <div class="np-sub">
-          <template v-if="snap.current && (snap.current.queuedByName || snap.current.queuedBy)">
-            queued by {{ snap.current.queuedByName || snap.current.queuedBy }} ·
+          <template v-if="cur && (cur.queuedByName || cur.queuedBy)">
+            queued by {{ cur.queuedByName || cur.queuedBy }} ·
           </template>
           {{ snap.channelId ? "in voice channel" : "not connected" }}
         </div>
@@ -57,7 +89,7 @@ function onLoop(snap: SessionSnapshot) {
         variant="ghost"
         size="md"
         title="Previous"
-        :disabled="!snap.hasPrev"
+        :disabled="!hasPrev"
         @click="emit('prev')"
       >⏮</AppButton>
       <AppButton
@@ -73,7 +105,7 @@ function onLoop(snap: SessionSnapshot) {
         title="Stop & leave"
         @click="emit('stop')"
       >⏹</AppButton>
-      <AppButton variant="ghost" size="sm" @click="onLoop(snap)">
+      <AppButton variant="ghost" size="sm" @click="onLoop">
         {{ loopBadge(snap.loop) }}
       </AppButton>
       <AppButton
