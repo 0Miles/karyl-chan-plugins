@@ -65,7 +65,7 @@ function onLoop(snap: SessionSnapshot) {
         size="md"
         :title="snap.paused ? 'Resume' : 'Pause'"
         @click="emit('pause', !snap.paused)"
-      >{{ snap.paused ? "▶️" : "⏸" }}</AppButton>
+      >{{ snap.paused ? "▶" : "⏸" }}</AppButton>
       <AppButton variant="ghost" size="md" title="Next" @click="emit('next')">⏭</AppButton>
       <AppButton
         variant="danger"
