@@ -54,6 +54,11 @@ export interface Track {
   trackId?: string;
   /** Cover image URL (library metadata), for the WebUI now-playing card. */
   coverUrl?: string;
+  /** Where the entry came from — user-queued ("user", the default) or
+   *  appended by the autoplay refill ("autoplay"). Used by the WebUI's
+   *  "Clear ♾️ autoplay" button to wipe AI-added tracks without touching
+   *  the user's own queue. Omitted on legacy tracks → treated as "user". */
+  source?: "user" | "autoplay";
   /**
    * The original *page* URL this track was sourced from — a YouTube /
    * SoundCloud / Bandcamp / … page, or a library track's download URL —
@@ -90,6 +95,15 @@ export interface GuildState {
   autoplaySeededFrom: string | null;
   /** How many recommendations the autoplay refill appends per fire. */
   autoplayFetchCount: number;
+  /**
+   * The session has been exhausted — peekNext returned null after a
+   * track ended or the user clicked /next past the last track, and the
+   * caller decided to stop rather than loop. Tells the advance loop the
+   * session is finished (isIdle flips true → teardown), and the WebUI
+   * snapshot to show "Nothing playing". Cleared by enqueue() / commitCursor()
+   * — any new play intent revives the session.
+   */
+  done: boolean;
 }
 
 /** Default for `GuildState.autoplayFetchCount` — recs queued per refill. */
@@ -114,6 +128,7 @@ function ensure(guildId: string): GuildState {
       autoplay: false,
       autoplaySeededFrom: null,
       autoplayFetchCount: DEFAULT_AUTOPLAY_FETCH_COUNT,
+      done: false,
     };
     states.set(guildId, s);
   }
@@ -127,6 +142,7 @@ export function getState(guildId: string): GuildState | null {
 // ── views ─────────────────────────────────────────────────────────────
 
 export function getCurrent(s: GuildState): Track | null {
+  if (s.done) return null;
   return s.cursor >= 0 && s.cursor < s.tracks.length ? s.tracks[s.cursor] : null;
 }
 
@@ -145,6 +161,10 @@ export function enqueue(guildId: string, track: Track): number {
   const s = ensure(guildId);
   if (track.qid === undefined) track.qid = nextQid++;
   s.tracks.push(track);
+  // Adding a track revives a previously-finished session — the advance
+  // loop's next tick will see `done=false` + `!status.playing` + a fresh
+  // peekNext candidate and start playing.
+  s.done = false;
   // First enqueue while idle: leave cursor at -1; the caller's first
   // advance() will commit it to 0. Don't auto-play just by enqueueing.
   return s.tracks.length - s.cursor - 1; // upcoming count after this push
@@ -255,7 +275,7 @@ export function setAutoplayFetchCount(guildId: string, n: number): number {
 /** True iff peekPrev would return a track (i.e. ⏮ button enabled). */
 export function hasPrevious(guildId: string): boolean {
   const s = states.get(guildId);
-  if (!s || s.tracks.length === 0) return false;
+  if (!s || s.done || s.tracks.length === 0) return false;
   if (s.loop === "track") return false;
   if (s.loop === "queue") return s.tracks.length > 1;
   return s.cursor > 0;
@@ -273,7 +293,7 @@ export function peekNext(
   guildId: string,
 ): { idx: number; track: Track } | null {
   const s = ensure(guildId);
-  if (s.tracks.length === 0) return null;
+  if (s.done || s.tracks.length === 0) return null;
   if (s.cursor < 0) return { idx: 0, track: s.tracks[0] };
   if (s.loop === "track") {
     return { idx: s.cursor, track: s.tracks[s.cursor] };
@@ -341,7 +361,7 @@ export function peekPrev(
   guildId: string,
 ): { idx: number; track: Track } | null {
   const s = ensure(guildId);
-  if (s.tracks.length === 0) return null;
+  if (s.done || s.tracks.length === 0) return null;
   if (s.loop === "track" && s.cursor >= 0) {
     return { idx: s.cursor, track: s.tracks[s.cursor] };
   }
@@ -363,11 +383,55 @@ export function commitCursor(guildId: string, idx: number): void {
   const s = ensure(guildId);
   if (idx < 0 || idx >= s.tracks.length) return;
   s.cursor = idx;
+  // Any successful play exits the done state — even a jump back into a
+  // previously-played track counts as "playing again".
+  s.done = false;
   if (s.cursor > MAX_PLAYED) {
     const drop = s.cursor - MAX_PLAYED;
     s.tracks.splice(0, drop);
     s.cursor -= drop;
   }
+}
+
+/**
+ * Mark the session as exhausted — peekNext / peekPrev / getCurrent will
+ * report nothing, isIdle flips true, and the advance loop's next tick
+ * tears down. Called by doNext when peekNext returns null and by the
+ * advance loop when a track ended with no autoplay refill possible.
+ * Cleared automatically by enqueue() or commitCursor().
+ */
+export function endSession(guildId: string): void {
+  const s = ensure(guildId);
+  s.done = true;
+}
+
+/**
+ * Remove every track whose `source === "autoplay"`, except the cursor's
+ * own track (yanking the playing entry mid-play would leave the audio
+ * file streaming with no entry to render). Returns the number removed.
+ * Adjusts the cursor exactly like dequeueByQids.
+ */
+export function clearAutoplay(guildId: string): number {
+  const s = ensure(guildId);
+  if (s.tracks.length === 0) return 0;
+  const before = s.tracks.length;
+  const next: Track[] = [];
+  let removedBeforeCursor = 0;
+  for (let i = 0; i < s.tracks.length; i++) {
+    const t = s.tracks[i];
+    if (t.source === "autoplay" && i !== s.cursor) {
+      if (i < s.cursor) removedBeforeCursor++;
+      continue;
+    }
+    next.push(t);
+  }
+  s.tracks = next;
+  s.cursor -= removedBeforeCursor;
+  // Resets the autoplay seed: the user explicitly threw out the last
+  // batch, so the next "track ended on last entry" should be allowed
+  // to fetch a fresh round from the same seed.
+  s.autoplaySeededFrom = null;
+  return before - s.tracks.length;
 }
 
 // ── legacy adapters ──────────────────────────────────────────────────

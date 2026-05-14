@@ -16,6 +16,7 @@ import {
   type LoopMode,
   type Track,
   commitCursor,
+  endSession,
   peekNext,
   peekPrev,
   peekQid,
@@ -59,6 +60,11 @@ export async function doNext(
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = peekNext(guildId);
     if (!candidate) {
+      // Mark done BEFORE stopping voice — the WebUI's `voice.status` poll
+      // in the next snapshot will see `done=true` so getCurrent reports
+      // null and NowPlayingCard shows "Nothing playing" instead of the
+      // last-played track frozen mid-row.
+      endSession(guildId);
       await botRpc("/api/plugin/voice.stop", { guild_id: guildId }).catch(
         () => null,
       );

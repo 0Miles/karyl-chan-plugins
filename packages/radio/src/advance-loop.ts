@@ -3,6 +3,7 @@ import {
   type GuildState,
   type Track,
   commitCursor,
+  endSession,
   enqueue,
   getCurrent,
   getPlayed,
@@ -72,6 +73,7 @@ function ensurePrefetch(guildId: string): void {
 function isIdle(guildId: string): boolean {
   const s = getState(guildId);
   if (!s) return true;
+  if (s.done) return true;
   if (s.loop !== "off") return false;
   // Nothing playing AND nothing upcoming.
   return !getCurrent(s) && getUpcoming(s).length === 0;
@@ -142,6 +144,9 @@ async function maybeAutoplayRefill(
     const id = youtubeVideoIdOf(t);
     if (id === null || seen.has(id)) continue;
     seen.add(id);
+    // Mark provenance so the WebUI "Clear ♾️ autoplay" button can wipe
+    // these without touching user-queued entries.
+    t.source = "autoplay";
     enqueue(guildId, t);
     queued++;
   }
@@ -261,6 +266,12 @@ async function processGuild(
               url: candidate.track.url,
             });
           }
+        } else {
+          // Track ended (or never started past the last one) with
+          // nothing to advance to — autoplay above already had its shot
+          // and didn't refill. Mark the session finished so isIdle below
+          // catches it and tears down rather than ticking forever.
+          endSession(guildId);
         }
       }
       // The advance above may have drained the queue — if so, the session
