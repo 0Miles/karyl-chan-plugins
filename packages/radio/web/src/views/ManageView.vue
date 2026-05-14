@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import AppButton from "../components/AppButton.vue";
 import Thumb from "../components/Thumb.vue";
 import TrackLink from "../components/TrackLink.vue";
@@ -18,6 +18,17 @@ const downloading = ref(false);
 const editing = ref<LibraryTrack | null>(null);
 const editVisible = ref(false);
 
+/**
+ * In-flight downloads waiting to land in the library — rendered as
+ * placeholder rows alongside the real tracks (same treatment as the
+ * playback session's "adding…" rows for queue inserts). yt-dlp can take
+ * 5–30 s; we poll the library every 2 s and drain pending entries FIFO
+ * as new track ids appear, with a 60 s safety net per entry.
+ */
+const pendingDownloads = ref<{ id: number; url: string }[]>([]);
+let pendingCounter = 0;
+let pollTimer: number | undefined;
+
 async function load() {
   try {
     const q = searchText.value.trim();
@@ -31,10 +42,37 @@ async function load() {
   }
 }
 
+function stopPolling(): void {
+  if (pollTimer !== undefined) {
+    window.clearInterval(pollTimer);
+    pollTimer = undefined;
+  }
+}
+
+function ensurePolling(): void {
+  if (pollTimer !== undefined) return;
+  pollTimer = window.setInterval(async () => {
+    if (pendingDownloads.value.length === 0) {
+      stopPolling();
+      return;
+    }
+    const prevIds = new Set(tracks.value.map((t) => t.id));
+    await load();
+    const fresh = tracks.value.filter((t) => !prevIds.has(t.id));
+    // FIFO: each newly-arrived library track resolves the oldest pending entry.
+    for (let i = 0; i < fresh.length && pendingDownloads.value.length > 0; i++) {
+      pendingDownloads.value.shift();
+    }
+    if (pendingDownloads.value.length === 0) stopPolling();
+  }, 2000);
+}
+
 async function startDownload() {
   const u = dlUrl.value.trim();
   if (!u) return;
   downloading.value = true;
+  const myId = ++pendingCounter;
+  pendingDownloads.value.push({ id: myId, url: u });
   try {
     const r = await api<{ alreadyExisted?: boolean }>(
       "POST",
@@ -43,13 +81,28 @@ async function startDownload() {
     );
     dlUrl.value = "";
     if (r?.alreadyExisted) {
+      pendingDownloads.value = pendingDownloads.value.filter(
+        (p) => p.id !== myId,
+      );
       ok("Already in library");
-      load();
+      await load();
     } else {
-      ok("Download started — refresh shortly");
-      setTimeout(load, 6000);
+      ok("Download started");
+      ensurePolling();
+      // Safety net: drop this pending entry after a minute even if the
+      // poller never matched it (server-side download took too long or
+      // failed — log will surface it on the next manual refresh).
+      window.setTimeout(() => {
+        pendingDownloads.value = pendingDownloads.value.filter(
+          (p) => p.id !== myId,
+        );
+        if (pendingDownloads.value.length === 0) stopPolling();
+      }, 60_000);
     }
   } catch (e: any) {
+    pendingDownloads.value = pendingDownloads.value.filter(
+      (p) => p.id !== myId,
+    );
     error(e.message);
   } finally {
     downloading.value = false;
@@ -79,6 +132,7 @@ function subText(t: LibraryTrack): string {
 }
 
 onMounted(load);
+onBeforeUnmount(stopPolling);
 </script>
 
 <template>
@@ -107,7 +161,10 @@ onMounted(load);
   <section class="section">
     <div class="section-title">Library</div>
     <ul class="list">
-      <li v-if="tracks.length === 0" class="empty">No tracks.</li>
+      <li
+        v-if="tracks.length === 0 && pendingDownloads.length === 0"
+        class="empty"
+      >No tracks.</li>
       <li v-for="t in tracks" :key="t.id" class="item">
         <Thumb :src="t.coverUrl" />
         <div class="info">
@@ -123,6 +180,17 @@ onMounted(load);
           <AppButton variant="danger" size="sm" @click="removeTrack(t)">
             🗑
           </AppButton>
+        </div>
+      </li>
+      <li
+        v-for="p in pendingDownloads"
+        :key="'dl-' + p.id"
+        class="item pending"
+      >
+        <div class="thumb thumb--sm thumb--placeholder">⏳</div>
+        <div class="info">
+          <div class="name">{{ p.url }}</div>
+          <div class="dim">downloading…</div>
         </div>
       </li>
     </ul>
@@ -145,6 +213,19 @@ onMounted(load);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
+}
+.item.pending { opacity: 0.55; }
+.thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--bg-surface-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 1.1rem;
+  flex-shrink: 0;
 }
 .info { min-width: 0; flex: 1; }
 .name {
