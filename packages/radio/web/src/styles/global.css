@@ -127,7 +127,24 @@ textarea:focus {
 .app-wrap {
   max-width: 760px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 3rem;
+  padding: 1.5rem 1rem 1.5rem;
+  /* Flex column so SessionView's `.playlist-scroll` can claim the
+     remaining viewport height. ManageView / DeniedView don't flex-grow
+     so they keep their natural top-down flow. */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Session view caps the wrapper to exactly the viewport — page no
+   longer scrolls, the playlist scrolls inside its own region instead.
+   ManageView / DeniedView leave this off so long admin lists still
+   scroll the page normally. */
+.app-wrap--locked {
+  height: 100vh;
+  min-height: 0;
+  max-height: 100vh;
+  overflow: hidden;
 }
 
 .app-header {

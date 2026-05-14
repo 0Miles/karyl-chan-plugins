@@ -128,6 +128,13 @@ const currentTrack = computed<Track | null>(() => {
   if (cursorQid.value === null) return null;
   return playlist.value.find((t) => t.qid === cursorQid.value) ?? null;
 });
+/** Enable the "Clear ♾️ autoplay" button only when there's something to
+ *  wipe — autoplay-sourced entries other than the cursor track. */
+const hasAutoplayTracks = computed<boolean>(() =>
+  playlist.value.some(
+    (t) => t.source === "autoplay" && t.qid !== cursorQid.value,
+  ),
+);
 
 onMounted(() => {
   refresh();
@@ -139,7 +146,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <template v-if="snap">
+  <div v-if="snap" class="session-layout">
     <NowPlayingCard
       :snap="snap"
       :current="currentTrack"
@@ -162,32 +169,51 @@ onUnmounted(() => {
       </form>
     </div>
 
-    <div class="topbar topbar-clear">
+    <div class="topbar topbar-tracks">
       <span class="muted">{{ playlist.length }} track{{ playlist.length === 1 ? "" : "s" }} in playlist</span>
       <AppButton
         variant="ghost"
         size="sm"
-        @click="act('POST', sessionPath('/clear'))"
-      >Clear upcoming</AppButton>
+        :disabled="!hasAutoplayTracks"
+        title="Remove every track the autoplay refill added"
+        @click="act('POST', sessionPath('/clear-autoplay'))"
+      >Clear ♾️ autoplay</AppButton>
     </div>
 
-    <PlaylistList
-      :playlist="playlist"
-      :cursor-qid="cursorQid"
-      :pending-remove-qids="pendingRemoveQids"
-      :pending-adds="pendingAdds"
-      @dequeue="scheduleDequeue"
-      @jump="jumpTo"
-      @reorder="reorder"
-    />
-  </template>
+    <div class="playlist-scroll">
+      <PlaylistList
+        :playlist="playlist"
+        :cursor-qid="cursorQid"
+        :pending-remove-qids="pendingRemoveQids"
+        :pending-adds="pendingAdds"
+        @dequeue="scheduleDequeue"
+        @jump="jumpTo"
+        @reorder="reorder"
+      />
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.topbar-clear {
-  margin: 1rem 0 0.5rem;
+/* Fill the viewport beneath the app header — NowPlayingCard, the add
+   box, and the tracks topbar take their natural heights; the playlist
+   takes the remainder and scrolls internally when it overflows. */
+.session-layout {
+  flex: 1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  min-height: 0;
+}
+.topbar-tracks {
+  margin: 0.75rem 0 0.5rem;
+}
+.playlist-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  /* Padding keeps the focus / hover ring on the last row from being
+     clipped by the scroll container. */
+  padding: 2px;
+  margin: -2px;
 }
 </style>

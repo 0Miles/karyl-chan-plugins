@@ -11,9 +11,10 @@ import type { Track } from "../types";
  * Unified playlist view. Renders the full cursor-based `playlist[]` as a
  * single ordered list with no played / upcoming split — the currently-
  * playing track is marked inline with an accent border and a ▶ glyph.
- * Every other row gets the same affordances (drag handle, click-to-jump,
- * ✕ to remove); the backend treats the playlist as one flat array, so
- * the UI matches.
+ * Every row (including the cursor row) is draggable; non-cursor rows
+ * also show a hover-only ▶ jump button left of the ✕ remove button. The
+ * cursor row has neither (you can't jump to what's already playing,
+ * and removing a row that's streaming is confusing).
  */
 const props = defineProps<{
   playlist: Track[];
@@ -56,13 +57,12 @@ function sub(t: Track): string {
 }
 
 // ── drag-reorder wiring ─────────────────────────────────────────────
-// One SortableJS instance over the unified `<ul>`. The cursor row is
-// filtered out as a drag source (`.no-drag` class + `filter` option) so
-// the currently-playing track can't be moved; pending-add placeholders
-// share the same exclusion. The cursor row IS a valid drop anchor — its
-// `data-qid` lets `beforeQid` resolve correctly when a track is dropped
-// immediately above it, and `reorderByQid` re-anchors the cursor by qid
-// after the splice.
+// One SortableJS instance over the unified `<ul>`. The cursor row IS
+// draggable (the backend's `reorderByQid` re-anchors the cursor by qid
+// after the splice, so moving the currently-playing track to a new
+// position keeps it playing). Only pending-add placeholders are
+// excluded via `.no-drag` — they have no qid yet and can't take part
+// in a reorder.
 
 const listEl = ref<HTMLElement | null>(null);
 let sortable: Sortable | null = null;
@@ -143,17 +143,10 @@ watch(
       :data-qid="t.qid"
       :data-cursor="isCursor ? 'true' : null"
       class="item track-item"
-      :class="{ 'cursor-item': isCursor, 'no-drag': isCursor }"
-      :title="isCursor ? 'Currently playing' : 'Click to jump to this track'"
-      @click="!isCursor && emit('jump', t.qid)"
+      :class="{ 'cursor-item': isCursor }"
+      :title="isCursor ? 'Currently playing' : t.label"
     >
-      <span
-        v-if="!isCursor"
-        class="drag-handle"
-        title="Drag to reorder"
-        @click.stop
-      >⋮⋮</span>
-      <span v-else class="drag-handle drag-handle--ghost" aria-hidden="true">⋮⋮</span>
+      <span class="drag-handle" title="Drag to reorder" @click.stop>⋮⋮</span>
 
       <span class="idx" :class="{ 'idx--cursor': isCursor }">
         {{ isCursor ? "▶" : i + 1 }}
@@ -173,6 +166,15 @@ watch(
           v-if="!isCursor"
           variant="ghost"
           size="sm"
+          class="row-action row-action--jump"
+          title="Play this track"
+          @click.stop="emit('jump', t.qid)"
+        >▶</AppButton>
+        <AppButton
+          v-if="!isCursor"
+          variant="ghost"
+          size="sm"
+          class="row-action row-action--remove"
           title="Remove"
           @click.stop="emit('dequeue', t.qid)"
         >✕</AppButton>
@@ -209,22 +211,32 @@ watch(
     border-color var(--transition-fast);
 }
 
-.track-item { cursor: pointer; }
 .track-item:hover { background: var(--bg-surface-hover); }
 .track-item.pending {
   opacity: 0.55;
-  cursor: default;
 }
 
-/* Currently-playing row: accent left-border + accent idx glyph. Not
-   clickable / draggable / removable — its controls live in NowPlayingCard. */
+/* Currently-playing row: accent left-border + accent idx glyph. The
+   drag handle is the only interactive bit (the controls for prev/pause/
+   next live in NowPlayingCard). */
 .cursor-item {
-  cursor: default;
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 var(--accent);
   padding-left: calc(0.7rem + 3px);
 }
 .cursor-item:hover { background: var(--bg-surface); }
+
+/* Row-level action buttons (▶ jump / ✕ remove) — present in the DOM so
+   the row's height stays stable, revealed only on hover. Keyboard focus
+   also reveals them so they remain reachable without a pointer. */
+.row-action {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.track-item:hover .row-action,
+.row-action:focus-visible {
+  opacity: 1;
+}
 
 .idx {
   color: var(--text-faint);
@@ -258,7 +270,9 @@ watch(
   gap: 0.35rem;
   flex-shrink: 0;
   align-items: center;
-  min-width: 1.8rem;
+  /* Two ghost-sm buttons side-by-side: ~3.6rem total. Reserved so a
+     hover-reveal doesn't shift the row's other contents. */
+  min-width: 3.6rem;
   justify-content: flex-end;
 }
 

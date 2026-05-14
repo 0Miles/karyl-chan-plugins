@@ -56,7 +56,7 @@ const modeLabel = computed(() => {
 </script>
 
 <template>
-  <div class="app-wrap">
+  <div class="app-wrap" :class="{ 'app-wrap--locked': view === 'session' }">
     <header class="app-header">
       <h1>📻 Karyl Radio</h1>
       <span class="mode">{{ modeLabel }}</span>

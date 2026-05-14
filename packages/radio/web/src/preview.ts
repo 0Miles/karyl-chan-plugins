@@ -1,4 +1,4 @@
-import { createApp, h, ref } from "vue";
+import { computed, createApp, h, ref } from "vue";
 import "./styles/global.css";
 import PlaylistList from "./components/PlaylistList.vue";
 import NowPlayingCard from "./components/NowPlayingCard.vue";
@@ -7,9 +7,10 @@ import AppToast from "./components/AppToast.vue";
 import type { SessionSnapshot, Track } from "./types";
 
 // Mock playlist: a few "played" tracks before the cursor, a "current"
-// track at qid=4, and a few "upcoming" tracks. Includes one with full
-// library metadata and one with only a label, to exercise the sub-line
-// fallback.
+// track at qid=4, and a few "upcoming" tracks. Tracks 6 + 7 are marked
+// as autoplay-sourced so the "Clear ♾️ autoplay" button has something
+// to act on. Plenty of entries so the playlist overflows and exercises
+// its own scroll container.
 const tracks: Track[] = [
   {
     qid: 1,
@@ -55,6 +56,7 @@ const tracks: Track[] = [
     label: "Septette for the Dead Princess",
     author: "ZUN",
     duration: 197,
+    source: "autoplay",
   },
   {
     qid: 7,
@@ -64,6 +66,21 @@ const tracks: Track[] = [
     duration: 173,
     queuedByName: "alice",
     sourceUrl: "https://example.com/7",
+    source: "autoplay",
+  },
+  {
+    qid: 8,
+    label: "Cirno's Perfect Math Class",
+    author: "IOSYS",
+    duration: 198,
+    source: "autoplay",
+  },
+  {
+    qid: 9,
+    label: "Help Me, ERINNNNNN!!",
+    author: "COOL&CREATE",
+    duration: 251,
+    source: "autoplay",
   },
 ];
 
@@ -80,6 +97,12 @@ const snap = ref<SessionSnapshot>({
 
 const pendingRemoveQids = ref<Set<number>>(new Set());
 const pendingAdds = ref<string[]>([]);
+
+const hasAutoplayTracks = computed(() =>
+  snap.value.playlist.some(
+    (t) => t.source === "autoplay" && t.qid !== snap.value.cursorQid,
+  ),
+);
 
 function jump(qid: number) {
   snap.value = { ...snap.value, cursorQid: qid };
@@ -113,42 +136,61 @@ function reorder(p: { qid: number; beforeQid: number | null }) {
   snap.value = { ...snap.value, playlist: list };
 }
 
+function clearAutoplay() {
+  snap.value = {
+    ...snap.value,
+    playlist: snap.value.playlist.filter(
+      (t) => t.source !== "autoplay" || t.qid === snap.value.cursorQid,
+    ),
+  };
+}
+
 createApp({
   setup() {
     return () =>
-      h("div", { class: "app-wrap" }, [
+      h("div", { class: "app-wrap app-wrap--locked" }, [
         h("header", { class: "app-header" }, [
           h("h1", "📻 Karyl Radio"),
           h("span", { class: "mode" }, "playback session · preview"),
         ]),
-        h(NowPlayingCard, {
-          snap: snap.value,
-          onPrev: () => console.log("prev"),
-          onPause: (paused: boolean) =>
-            (snap.value = { ...snap.value, paused }),
-          onNext: () => console.log("next"),
-          onStop: () => console.log("stop"),
-          onLoop: (mode: "off" | "track" | "queue") =>
-            (snap.value = { ...snap.value, loop: mode }),
-          onAutoplay: (on: boolean) =>
-            (snap.value = { ...snap.value, autoplay: on }),
-        }),
-        h("div", { class: "card" }, [
-          h("div", { class: "row" }, [
-            h("input", {
-              class: "grow",
-              placeholder: "Add to queue — preview only",
-            }),
-            h(AppButton, { type: "submit" }, () => "➕ Add"),
-          ]),
-        ]),
+        // Inline the scoped styles SessionView applies — the preview
+        // doesn't use that component, but the layout has to match for
+        // the playlist-scroll demo to be meaningful.
         h(
           "div",
           {
-            class: "topbar",
-            style: "margin: 1rem 0 0.5rem;",
+            style:
+              "flex:1;display:flex;flex-direction:column;min-height:0",
           },
           [
+          h(NowPlayingCard, {
+            snap: snap.value,
+            onPrev: () => console.log("prev"),
+            onPause: (paused: boolean) =>
+              (snap.value = { ...snap.value, paused }),
+            onNext: () => console.log("next"),
+            onStop: () => console.log("stop"),
+            onLoop: (mode: "off" | "track" | "queue") =>
+              (snap.value = { ...snap.value, loop: mode }),
+            onAutoplay: (on: boolean) =>
+              (snap.value = { ...snap.value, autoplay: on }),
+          }),
+          h("div", { class: "card" }, [
+            h("div", { class: "row" }, [
+              h("input", {
+                class: "grow",
+                placeholder: "Add to queue — preview only",
+              }),
+              h(AppButton, { type: "submit" }, () => "➕ Add"),
+            ]),
+          ]),
+          h(
+            "div",
+            {
+              class: "topbar",
+              style: "margin:0.75rem 0 0.5rem",
+            },
+            [
             h(
               "span",
               { class: "muted" },
@@ -159,30 +201,31 @@ createApp({
               {
                 variant: "ghost",
                 size: "sm",
-                onClick: () =>
-                  (snap.value = {
-                    ...snap.value,
-                    playlist: snap.value.playlist.slice(
-                      0,
-                      snap.value.playlist.findIndex(
-                        (t) => t.qid === snap.value.cursorQid,
-                      ) + 1,
-                    ),
-                  }),
+                disabled: !hasAutoplayTracks.value,
+                title: "Remove every track the autoplay refill added",
+                onClick: clearAutoplay,
               },
-              () => "Clear upcoming",
+              () => "Clear ♾️ autoplay",
             ),
-          ],
-        ),
-        h(PlaylistList, {
-          playlist: snap.value.playlist,
-          cursorQid: snap.value.cursorQid,
-          pendingRemoveQids: pendingRemoveQids.value,
-          pendingAdds: pendingAdds.value,
-          onJump: jump,
-          onDequeue: dequeue,
-          onReorder: reorder,
-        }),
+          ]),
+          h(
+            "div",
+            {
+              style:
+                "flex:1;overflow-y:auto;min-height:0;padding:2px;margin:-2px",
+            },
+            [
+            h(PlaylistList, {
+              playlist: snap.value.playlist,
+              cursorQid: snap.value.cursorQid,
+              pendingRemoveQids: pendingRemoveQids.value,
+              pendingAdds: pendingAdds.value,
+              onJump: jump,
+              onDequeue: dequeue,
+              onReorder: reorder,
+            }),
+          ]),
+        ]),
         h(AppToast),
       ]);
   },

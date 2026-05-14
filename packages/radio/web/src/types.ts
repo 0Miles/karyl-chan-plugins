@@ -15,6 +15,10 @@ export interface Track {
   author?: string;
   album?: string;
   duration?: number;
+  /** Present (and equal to "autoplay") only when the entry was appended
+   *  by the autoplay refill — the WebUI's "Clear ♾️ autoplay" button
+   *  enables when any track carries this. User-queued entries omit it. */
+  source?: "autoplay";
 }
 
 export type LoopMode = "off" | "track" | "queue";
