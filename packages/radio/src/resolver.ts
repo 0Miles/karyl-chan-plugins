@@ -170,13 +170,24 @@ export async function resolveAutoplayRecommendations(
   videoId: string,
 ): Promise<Track[]> {
   const entries = await resolveMixRecommendations(videoId);
-  return entries.map((e) => ({
-    url: e.url,
-    label: e.title,
-    queuedBy: null,
-    queuedByName: "Autoplay",
-    needsResolve: true,
-  }));
+  return entries.map((e) => {
+    // YouTube serves a deterministic per-video-id thumbnail at i.ytimg —
+    // setting it eagerly means the WebUI shows cover art the moment the
+    // refill arrives, without waiting for the per-track playTrack
+    // resolution to fill it in.
+    const id = youtubeVideoIdFromUrl(e.url);
+    const coverUrl = id
+      ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+      : undefined;
+    return {
+      url: e.url,
+      label: e.title,
+      queuedBy: null,
+      queuedByName: "Autoplay",
+      needsResolve: true,
+      ...(coverUrl ? { coverUrl } : {}),
+    };
+  });
 }
 
 /**

@@ -34,7 +34,6 @@ import {
   type LoopMode,
   type Track,
   DEFAULT_AUTOPLAY_FETCH_COUNT,
-  clearAutoplay,
   clearQueue,
   commitCursor,
   dequeueAt,
@@ -818,21 +817,6 @@ export async function registerWebRoutes(
       if (!authSession(request, reply, guildId)) return;
       return withGuildLock(guildId, async () => {
         clearQueue(guildId);
-        return syncAndSnapshot(guildId);
-      });
-    },
-  );
-
-  // Drop every autoplay-sourced entry from the playlist (everywhere
-  // except the cursor's own track, which would yank a playing entry).
-  // The user keeps their own queue intact; the AI suggestions get wiped.
-  server.post<{ Params: { guildId: string } }>(
-    "/api/session/:guildId/clear-autoplay",
-    async (request, reply) => {
-      const { guildId } = request.params;
-      if (!authSession(request, reply, guildId)) return;
-      return withGuildLock(guildId, async () => {
-        clearAutoplay(guildId);
         return syncAndSnapshot(guildId);
       });
     },

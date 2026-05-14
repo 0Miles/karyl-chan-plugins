@@ -128,14 +128,6 @@ const currentTrack = computed<Track | null>(() => {
   if (cursorQid.value === null) return null;
   return playlist.value.find((t) => t.qid === cursorQid.value) ?? null;
 });
-/** Enable the "Clear ♾️ autoplay" button only when there's something to
- *  wipe — autoplay-sourced entries other than the cursor track. */
-const hasAutoplayTracks = computed<boolean>(() =>
-  playlist.value.some(
-    (t) => t.source === "autoplay" && t.qid !== cursorQid.value,
-  ),
-);
-
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 5000);
@@ -171,13 +163,6 @@ onUnmounted(() => {
 
     <div class="topbar topbar-tracks">
       <span class="muted">{{ playlist.length }} track{{ playlist.length === 1 ? "" : "s" }} in playlist</span>
-      <AppButton
-        variant="ghost"
-        size="sm"
-        :disabled="!hasAutoplayTracks"
-        title="Remove every track the autoplay refill added"
-        @click="act('POST', sessionPath('/clear-autoplay'))"
-      >Clear ♾️ autoplay</AppButton>
     </div>
 
     <div class="playlist-scroll">

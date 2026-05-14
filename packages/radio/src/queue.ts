@@ -260,7 +260,34 @@ export function setLoop(guildId: string, mode: LoopMode): void {
 export function setAutoplay(guildId: string, on: boolean): void {
   const s = ensure(guildId);
   s.autoplay = on;
-  if (!on) s.autoplaySeededFrom = null;
+  if (!on) {
+    s.autoplaySeededFrom = null;
+    // Turning autoplay off also throws out everything the autoplay
+    // refill ever appended (except the cursor row mid-play). It folds
+    // the previous explicit "Clear ♾️ autoplay" button into the toggle
+    // — the user's intent on flipping it off is "stop suggesting".
+    clearAutoplayUnlocked(s);
+  }
+}
+
+/** Internal: clearAutoplay against an already-resolved state. The
+ *  exported wrapper resolves the state and forwards. */
+function clearAutoplayUnlocked(s: GuildState): number {
+  if (s.tracks.length === 0) return 0;
+  const before = s.tracks.length;
+  const next: Track[] = [];
+  let removedBeforeCursor = 0;
+  for (let i = 0; i < s.tracks.length; i++) {
+    const t = s.tracks[i];
+    if (t.source === "autoplay" && i !== s.cursor) {
+      if (i < s.cursor) removedBeforeCursor++;
+      continue;
+    }
+    next.push(t);
+  }
+  s.tracks = next;
+  s.cursor -= removedBeforeCursor;
+  return before - s.tracks.length;
 }
 
 export function setAutoplayFetchCount(guildId: string, n: number): number {
@@ -405,34 +432,6 @@ export function endSession(guildId: string): void {
   s.done = true;
 }
 
-/**
- * Remove every track whose `source === "autoplay"`, except the cursor's
- * own track (yanking the playing entry mid-play would leave the audio
- * file streaming with no entry to render). Returns the number removed.
- * Adjusts the cursor exactly like dequeueByQids.
- */
-export function clearAutoplay(guildId: string): number {
-  const s = ensure(guildId);
-  if (s.tracks.length === 0) return 0;
-  const before = s.tracks.length;
-  const next: Track[] = [];
-  let removedBeforeCursor = 0;
-  for (let i = 0; i < s.tracks.length; i++) {
-    const t = s.tracks[i];
-    if (t.source === "autoplay" && i !== s.cursor) {
-      if (i < s.cursor) removedBeforeCursor++;
-      continue;
-    }
-    next.push(t);
-  }
-  s.tracks = next;
-  s.cursor -= removedBeforeCursor;
-  // Resets the autoplay seed: the user explicitly threw out the last
-  // batch, so the next "track ended on last entry" should be allowed
-  // to fetch a fresh round from the same seed.
-  s.autoplaySeededFrom = null;
-  return before - s.tracks.length;
-}
 
 // ── legacy adapters ──────────────────────────────────────────────────
 // Kept for now-playing.ts / format.ts / playback-actions.ts / web-routes

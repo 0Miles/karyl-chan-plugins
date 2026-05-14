@@ -1,4 +1,4 @@
-import { computed, createApp, h, ref } from "vue";
+import { createApp, h, ref } from "vue";
 import "./styles/global.css";
 import PlaylistList from "./components/PlaylistList.vue";
 import NowPlayingCard from "./components/NowPlayingCard.vue";
@@ -98,12 +98,6 @@ const snap = ref<SessionSnapshot>({
 const pendingRemoveQids = ref<Set<number>>(new Set());
 const pendingAdds = ref<string[]>([]);
 
-const hasAutoplayTracks = computed(() =>
-  snap.value.playlist.some(
-    (t) => t.source === "autoplay" && t.qid !== snap.value.cursorQid,
-  ),
-);
-
 function jump(qid: number) {
   snap.value = { ...snap.value, cursorQid: qid };
 }
@@ -136,13 +130,20 @@ function reorder(p: { qid: number; beforeQid: number | null }) {
   snap.value = { ...snap.value, playlist: list };
 }
 
-function clearAutoplay() {
-  snap.value = {
-    ...snap.value,
-    playlist: snap.value.playlist.filter(
-      (t) => t.source !== "autoplay" || t.qid === snap.value.cursorQid,
-    ),
-  };
+function setAutoplay(on: boolean) {
+  // Mirror the backend's setAutoplay: turning autoplay off wipes
+  // autoplay-sourced tracks (preserves the cursor row mid-play).
+  if (!on) {
+    snap.value = {
+      ...snap.value,
+      autoplay: on,
+      playlist: snap.value.playlist.filter(
+        (t) => t.source !== "autoplay" || t.qid === snap.value.cursorQid,
+      ),
+    };
+  } else {
+    snap.value = { ...snap.value, autoplay: on };
+  }
 }
 
 createApp({
@@ -172,8 +173,7 @@ createApp({
             onStop: () => console.log("stop"),
             onLoop: (mode: "off" | "track" | "queue") =>
               (snap.value = { ...snap.value, loop: mode }),
-            onAutoplay: (on: boolean) =>
-              (snap.value = { ...snap.value, autoplay: on }),
+            onAutoplay: setAutoplay,
           }),
           h("div", { class: "card" }, [
             h("div", { class: "row" }, [
@@ -191,23 +191,13 @@ createApp({
               style: "margin:0.75rem 0 0.5rem",
             },
             [
-            h(
-              "span",
-              { class: "muted" },
-              `${snap.value.playlist.length} tracks in playlist`,
-            ),
-            h(
-              AppButton,
-              {
-                variant: "ghost",
-                size: "sm",
-                disabled: !hasAutoplayTracks.value,
-                title: "Remove every track the autoplay refill added",
-                onClick: clearAutoplay,
-              },
-              () => "Clear ♾️ autoplay",
-            ),
-          ]),
+              h(
+                "span",
+                { class: "muted" },
+                `${snap.value.playlist.length} tracks in playlist`,
+              ),
+            ],
+          ),
           h(
             "div",
             {
