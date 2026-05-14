@@ -34,11 +34,13 @@ import {
   type LoopMode,
   type Track,
   DEFAULT_AUTOPLAY_FETCH_COUNT,
+  advance,
   clearQueue,
   dequeueAt,
   enqueue,
   getState,
   setAutoplay,
+  setCurrent,
   setLoop,
 } from "./queue.js";
 import { doNext, doPrev } from "./playback-actions.js";
@@ -493,18 +495,82 @@ export async function registerWebRoutes(
     },
   );
 
+  // Per-guild batching for /next: a rapid burst of skip clicks would
+  // otherwise trigger one voice.play per click (each tearing down and
+  // restarting the bot's audio stream a few ms later — audible as
+  // stuttering). We collect all /next requests that arrive within a
+  // short window into a single batch keyed on guild: every /next during
+  // that window resolves to the same final snapshot, and we advance the
+  // queue past the intermediate tracks (committing each via setCurrent
+  // so history / playLog reflect them) and call voice.play only once,
+  // on the final destination.
+  //
+  // 90 ms is below the human "this felt instant" threshold (~100 ms),
+  // short enough not to feel laggy on an isolated click, but long
+  // enough to catch a 5-click spam.
+  const SKIP_COALESCE_MS = 90;
+  interface SkipBatch {
+    count: number;
+    waiters: Array<{
+      resolve: (snap: Record<string, unknown>) => void;
+      reject: (err: unknown) => void;
+    }>;
+  }
+  const skipBatches = new Map<string, SkipBatch>();
+
+  function scheduleSkip(
+    guildId: string,
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const existing = skipBatches.get(guildId);
+      if (existing) {
+        existing.count++;
+        existing.waiters.push({ resolve, reject });
+        return;
+      }
+      const batch: SkipBatch = {
+        count: 1,
+        waiters: [{ resolve, reject }],
+      };
+      skipBatches.set(guildId, batch);
+      setTimeout(() => drainSkipBatch(guildId), SKIP_COALESCE_MS);
+    });
+  }
+
+  async function drainSkipBatch(guildId: string): Promise<void> {
+    const batch = skipBatches.get(guildId);
+    if (!batch) return;
+    skipBatches.delete(guildId);
+    if (!_botRpc) {
+      const err = new Error("bot RPC unavailable");
+      for (const w of batch.waiters) w.reject(err);
+      return;
+    }
+    try {
+      const snap = await withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
+        for (let i = 0; i < batch.count - 1; i++) {
+          const skipped = advance(guildId);
+          if (!skipped) break;
+          setCurrent(guildId, skipped);
+        }
+        await doNext(guildId, _botRpc!);
+        return syncAndSnapshot(guildId);
+      });
+      for (const w of batch.waiters) w.resolve(snap);
+    } catch (err) {
+      for (const w of batch.waiters) w.reject(err);
+    }
+  }
+
   server.post<{ Params: { guildId: string } }>(
     "/api/session/:guildId/next",
     async (request, reply) => {
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
-      return withGuildLock(guildId, async () => {
-        keepAdvancing(guildId);
-        if (!_botRpc)
-          return reply.code(503).send({ error: "bot RPC unavailable" });
-        await doNext(guildId, _botRpc);
-        return syncAndSnapshot(guildId);
-      });
+      if (!_botRpc)
+        return reply.code(503).send({ error: "bot RPC unavailable" });
+      return scheduleSkip(guildId);
     },
   );
 
