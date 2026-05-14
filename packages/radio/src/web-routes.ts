@@ -14,10 +14,12 @@ import {
   downloadAndStore,
   findBySourceUrl,
   getTrack,
+  listTracks,
   removeTrack,
   searchTracks,
   syncWithDisk,
   updateTrack,
+  type LibraryTrack,
   type TrackMetadataPatch,
 } from "./library.js";
 import {
@@ -115,13 +117,22 @@ function safeAudioName(filename: string): boolean {
 const LOOP_MODES: LoopMode[] = ["off", "track", "queue"];
 
 /** WebUI-facing shape of a track (no internal URLs leaked). */
-function publicTrack(t: Track): Record<string, unknown> {
+function publicTrack(
+  t: Track,
+  libIndex?: Map<string, LibraryTrack>,
+): Record<string, unknown> {
   // The track's user-facing "source": a YouTube/SoundCloud/… page URL it
   // was resolved or downloaded from (kept on the Track as `originUrl`),
   // else a direct http(s) media / station URL — but never the internal
   // `/internal/audio/…` path a downloaded library file is streamed from.
   const sourceUrl =
     t.originUrl ?? (!t.trackId && isHttpUrl(t.url) ? t.url : undefined);
+  // Library-sourced tracks carry only `trackId` + `coverUrl` in the queue
+  // state — the WebUI also wants the editable metadata (author / album /
+  // duration) so the now-playing / queue / played lists can render them
+  // alongside the label. Resolve via the optional in-memory library index
+  // the caller built so we don't re-load library.json per track.
+  const lib = t.trackId ? libIndex?.get(t.trackId) : undefined;
   return {
     label: t.label,
     queuedBy: t.queuedBy,
@@ -129,6 +140,9 @@ function publicTrack(t: Track): Record<string, unknown> {
     ...(t.trackId ? { trackId: t.trackId } : {}),
     ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
     ...(sourceUrl ? { sourceUrl } : {}),
+    ...(lib?.author ? { author: lib.author } : {}),
+    ...(lib?.album ? { album: lib.album } : {}),
+    ...(lib?.duration != null ? { duration: lib.duration } : {}),
   };
 }
 
@@ -144,20 +158,25 @@ async function sessionSnapshot(
     }).catch(() => null)) as { channelId?: string | null } | null;
     channelId = status?.channelId ?? null;
   }
+  // Build the library index once — listTracks() reads a cached in-memory
+  // array, but Map lookup beats Array.find() across the (current + queue +
+  // played) traversal that follows.
+  const libIndex = new Map<string, LibraryTrack>();
+  for (const lt of await listTracks()) libIndex.set(lt.id, lt);
   return {
     guildId,
     channelId,
     loop: s?.loop ?? "off",
     autoplay: s?.autoplay ?? false,
     autoplayFetchCount: s?.autoplayFetchCount ?? DEFAULT_AUTOPLAY_FETCH_COUNT,
-    current: s?.current ? publicTrack(s.current) : null,
-    queue: (s?.queue ?? []).map(publicTrack),
+    current: s?.current ? publicTrack(s.current, libIndex) : null,
+    queue: (s?.queue ?? []).map((t) => publicTrack(t, libIndex)),
     queueLength: s?.queue.length ?? 0,
     hasPrev: (s?.history.length ?? 0) > 0,
     // Played this session, recency-ordered (oldest first, distinct).
     // Each item carries a stable `seq` the WebUI sends to /replay/:seq.
     played: (s?.playLog ?? []).map((e) => ({
-      ...publicTrack(e.track),
+      ...publicTrack(e.track, libIndex),
       seq: e.seq,
     })),
   };

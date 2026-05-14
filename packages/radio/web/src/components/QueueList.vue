@@ -2,6 +2,7 @@
 import AppButton from "./AppButton.vue";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
+import { trackMeta } from "../composables/use-format";
 import type { Track } from "../types";
 
 defineProps<{
@@ -10,6 +11,13 @@ defineProps<{
 }>();
 
 defineEmits<{ (e: "dequeue", index: number): void }>();
+
+function sub(t: Track): string {
+  const meta = trackMeta(t);
+  const who = t.queuedByName || t.queuedBy;
+  const queued = who ? "queued by " + who : "";
+  return [meta, queued].filter(Boolean).join(" · ");
+}
 </script>
 
 <template>
@@ -24,9 +32,7 @@ defineEmits<{ (e: "dequeue", index: number): void }>();
         <div class="name">
           <TrackLink :label="t.label" :url="t.sourceUrl" />
         </div>
-        <div class="dim" v-if="t.queuedByName || t.queuedBy">
-          queued by {{ t.queuedByName || t.queuedBy }}
-        </div>
+        <div class="dim" v-if="sub(t)">{{ sub(t) }}</div>
       </div>
       <div class="actions">
         <AppButton variant="ghost" size="sm" title="Remove" @click="$emit('dequeue', i)">✕</AppButton>

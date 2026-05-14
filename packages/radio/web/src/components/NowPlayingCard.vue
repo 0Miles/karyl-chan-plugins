@@ -3,7 +3,7 @@ import AppButton from "./AppButton.vue";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
 import type { SessionSnapshot } from "../types";
-import { loopBadge, nextLoop, autoplayBadge } from "../composables/use-format";
+import { loopBadge, nextLoop, autoplayBadge, trackMeta } from "../composables/use-format";
 
 defineProps<{ snap: SessionSnapshot }>();
 
@@ -31,6 +31,9 @@ function onLoop(snap: SessionSnapshot) {
             :url="snap.current.sourceUrl"
           />
           <span v-else class="muted">Nothing playing</span>
+        </div>
+        <div v-if="snap.current && trackMeta(snap.current)" class="np-info">
+          {{ trackMeta(snap.current) }}
         </div>
         <div class="np-sub">
           <template v-if="snap.current && (snap.current.queuedByName || snap.current.queuedBy)">
@@ -87,10 +90,18 @@ function onLoop(snap: SessionSnapshot) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.np-sub {
-  color: var(--text-muted);
+.np-info {
+  color: var(--text);
   font-size: 0.85rem;
   margin-top: 0.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.np-sub {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
 }
 .np-badges {
   margin-top: 0.5rem;

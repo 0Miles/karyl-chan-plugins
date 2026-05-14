@@ -33,3 +33,12 @@ export function autoplayBadge(on: boolean, n?: number): string {
 export function isExternalUrl(u?: string): boolean {
   return typeof u === "string" && /^https?:\/\//i.test(u);
 }
+
+/** Join author · album · duration into a single subline; empty when none set. */
+export function trackMeta(t: {
+  author?: string;
+  album?: string;
+  duration?: number;
+}): string {
+  return [t.author, t.album, fmtDur(t.duration)].filter(Boolean).join(" · ");
+}

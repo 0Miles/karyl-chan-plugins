@@ -5,6 +5,10 @@ export interface Track {
   trackId?: string;
   coverUrl?: string;
   sourceUrl?: string;
+  /** Library metadata, present when the queue entry came from the downloaded library. */
+  author?: string;
+  album?: string;
+  duration?: number;
 }
 
 export interface PlayedTrack extends Track {

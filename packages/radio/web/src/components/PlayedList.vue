@@ -3,6 +3,7 @@ import { computed } from "vue";
 import AppButton from "./AppButton.vue";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
+import { trackMeta } from "../composables/use-format";
 import type { PlayedTrack } from "../types";
 
 const props = defineProps<{ played: PlayedTrack[] }>();
@@ -10,6 +11,13 @@ defineEmits<{ (e: "replay", seq: number): void }>();
 
 // Newest first.
 const reversed = computed(() => [...props.played].reverse());
+
+function sub(t: PlayedTrack): string {
+  const meta = trackMeta(t);
+  const who = t.queuedByName || t.queuedBy;
+  const queued = who ? "queued by " + who : "";
+  return [meta, queued].filter(Boolean).join(" · ");
+}
 </script>
 
 <template>
@@ -23,9 +31,7 @@ const reversed = computed(() => [...props.played].reverse());
         <div class="name">
           <TrackLink :label="t.label" :url="t.sourceUrl" />
         </div>
-        <div class="dim" v-if="t.queuedByName || t.queuedBy">
-          queued by {{ t.queuedByName || t.queuedBy }}
-        </div>
+        <div class="dim" v-if="sub(t)">{{ sub(t) }}</div>
       </div>
       <div class="actions">
         <AppButton variant="ghost" size="sm" title="Re-queue this track" @click="$emit('replay', t.seq)">↻</AppButton>
