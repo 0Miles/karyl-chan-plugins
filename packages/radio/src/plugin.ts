@@ -558,6 +558,10 @@ export default function buildPlugin() {
                     const res = (await ctx.botRpc("/api/plugin/auth.session", {
                       user_id: userId,
                       kind: "manage",
+                      // Override the bot's 15-min manage-token default — the
+                      // admin WebUI involves browsing/searching/editing the
+                      // library, which routinely outruns 15 min in practice.
+                      ttl_ms: 60 * 60_000,
                     })) as { allowed?: boolean; token?: string } | null;
                     // botRpc returns null on a non-2xx (e.g. the bot hasn't
                     // approved this plugin's `auth.session` RPC scope yet), and a
@@ -580,7 +584,7 @@ export default function buildPlugin() {
                     }
                     return {
                       content:
-                        "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Link valid ~15 minutes.",
+                        "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Link valid ~1 hour.",
                       components: [
                         linkButtonRow(
                           "🔧 Open admin WebUI",
