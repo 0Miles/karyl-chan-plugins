@@ -9,7 +9,9 @@ defineProps<{ snap: SessionSnapshot }>();
 
 const emit = defineEmits<{
   (e: "prev"): void;
+  (e: "pause", paused: boolean): void;
   (e: "next"): void;
+  (e: "stop"): void;
   (e: "loop", mode: "off" | "track" | "queue"): void;
   (e: "autoplay", on: boolean): void;
 }>();
@@ -58,7 +60,19 @@ function onLoop(snap: SessionSnapshot) {
         :disabled="!snap.hasPrev"
         @click="emit('prev')"
       >⏮</AppButton>
+      <AppButton
+        variant="ghost"
+        size="md"
+        :title="snap.paused ? 'Resume' : 'Pause'"
+        @click="emit('pause', !snap.paused)"
+      >{{ snap.paused ? "▶️" : "⏸" }}</AppButton>
       <AppButton variant="ghost" size="md" title="Next" @click="emit('next')">⏭</AppButton>
+      <AppButton
+        variant="danger"
+        size="md"
+        title="Stop & leave"
+        @click="emit('stop')"
+      >⏹</AppButton>
       <AppButton variant="ghost" size="sm" @click="onLoop(snap)">
         {{ loopBadge(snap.loop) }}
       </AppButton>

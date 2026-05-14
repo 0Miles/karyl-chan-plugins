@@ -20,6 +20,7 @@ export type LoopMode = "off" | "track" | "queue";
 export interface SessionSnapshot {
   guildId: string;
   channelId: string | null;
+  paused: boolean;
   loop: LoopMode;
   autoplay: boolean;
   autoplayFetchCount: number;

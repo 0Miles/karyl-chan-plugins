@@ -75,7 +75,9 @@ onUnmounted(() => {
     <NowPlayingCard
       :snap="snap"
       @prev="act('POST', sessionPath('/prev'))"
+      @pause="(paused: boolean) => act('POST', sessionPath('/pause'), { paused })"
       @next="act('POST', sessionPath('/next'))"
+      @stop="act('POST', sessionPath('/stop'))"
       @loop="setLoop"
       @autoplay="setAutoplay"
     />

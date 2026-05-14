@@ -43,7 +43,7 @@ import {
   setCurrent,
   setLoop,
 } from "./queue.js";
-import { doNext, doPrev } from "./playback-actions.js";
+import { doNext, doPause, doPrev, doStop } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import {
@@ -154,11 +154,16 @@ async function sessionSnapshot(
 ): Promise<Record<string, unknown>> {
   const s = getState(guildId);
   let channelId: string | null = null;
+  let paused = false;
   if (_botRpc) {
     const status = (await _botRpc("/api/plugin/voice.status", {
       guild_id: guildId,
-    }).catch(() => null)) as { channelId?: string | null } | null;
+    }).catch(() => null)) as {
+      channelId?: string | null;
+      paused?: boolean;
+    } | null;
     channelId = status?.channelId ?? null;
+    paused = status?.paused === true;
   }
   // Build the library index once — listTracks() reads a cached in-memory
   // array, but Map lookup beats Array.find() across the (current + queue +
@@ -168,6 +173,7 @@ async function sessionSnapshot(
   return {
     guildId,
     channelId,
+    paused,
     loop: s?.loop ?? "off",
     autoplay: s?.autoplay ?? false,
     autoplayFetchCount: s?.autoplayFetchCount ?? DEFAULT_AUTOPLAY_FETCH_COUNT,
@@ -586,6 +592,49 @@ export async function registerWebRoutes(
         const r = await doPrev(guildId, _botRpc);
         if (r.kind === "no-history")
           return reply.code(409).send({ error: "Nothing to go back to" });
+        return syncAndSnapshot(guildId);
+      });
+    },
+  );
+
+  // ⏯ Pause / resume. Body `{ paused: bool }` to force a state, omit to
+  // toggle. Mirrors the np-embed pause button.
+  server.post<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/pause",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      if (!authSession(request, reply, guildId)) return;
+      let body: { paused?: unknown } | undefined;
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { paused?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      const wantPaused =
+        body && typeof body.paused === "boolean" ? body.paused : undefined;
+      return withGuildLock(guildId, async () => {
+        if (!_botRpc)
+          return reply.code(503).send({ error: "bot RPC unavailable" });
+        await doPause(guildId, _botRpc, wantPaused);
+        return syncAndSnapshot(guildId);
+      });
+    },
+  );
+
+  // ⏹ Stop: clear queue, leave voice. Mirrors the np-embed stop button.
+  // Session lives on (the WebUI link stays usable for queueing new tracks).
+  server.post<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/stop",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      if (!authSession(request, reply, guildId)) return;
+      return withGuildLock(guildId, async () => {
+        if (!_botRpc)
+          return reply.code(503).send({ error: "bot RPC unavailable" });
+        await doStop(guildId, _botRpc);
         return syncAndSnapshot(guildId);
       });
     },
