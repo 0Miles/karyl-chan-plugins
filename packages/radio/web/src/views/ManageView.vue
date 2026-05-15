@@ -26,14 +26,19 @@ const downloading = ref(false);
 const editing = ref<LibraryTrack | null>(null);
 const editVisible = computed(() => editing.value !== null);
 
-// Playlists tab. `editingPlaylist` follows the same single-ref pattern;
-// the extra `creating` flag distinguishes "open with null = create new"
-// from "closed" (modal isn't visible in either state without it).
+// Playlists tab. Single discriminated ref — the literal "new" means
+// "open the modal in create mode", a Playlist means "open in edit mode
+// with this row", and null means closed. Keeps "what does the modal
+// show?" expressible in one piece of state (the same single-source
+// invariant the edit-track modal uses).
 const playlists = ref<Playlist[]>([]);
-const editingPlaylist = ref<Playlist | null>(null);
-const creatingPlaylist = ref(false);
-const playlistEditVisible = computed(
-  () => creatingPlaylist.value || editingPlaylist.value !== null,
+type PlaylistEditState = Playlist | "new" | null;
+const playlistEditing = ref<PlaylistEditState>(null);
+const playlistEditVisible = computed(() => playlistEditing.value !== null);
+const playlistEditingTarget = computed<Playlist | null>(() =>
+  playlistEditing.value === "new" || playlistEditing.value === null
+    ? null
+    : playlistEditing.value,
 );
 
 /**
@@ -145,16 +150,13 @@ async function loadPlaylists(): Promise<void> {
 }
 
 function openCreatePlaylist(): void {
-  creatingPlaylist.value = true;
-  editingPlaylist.value = null;
+  playlistEditing.value = "new";
 }
 function openEditPlaylist(p: Playlist): void {
-  creatingPlaylist.value = false;
-  editingPlaylist.value = p;
+  playlistEditing.value = p;
 }
 function closePlaylistEdit(): void {
-  creatingPlaylist.value = false;
-  editingPlaylist.value = null;
+  playlistEditing.value = null;
 }
 
 async function removePlaylist(p: Playlist): Promise<void> {
@@ -322,7 +324,7 @@ onBeforeUnmount(stopPolling);
   />
 
   <EditPlaylistModal
-    :playlist="editingPlaylist"
+    :playlist="playlistEditingTarget"
     :visible="playlistEditVisible"
     :library="tracks"
     @close="closePlaylistEdit"
