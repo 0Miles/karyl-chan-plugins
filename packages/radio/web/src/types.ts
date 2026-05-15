@@ -15,10 +15,14 @@ export interface Track {
   author?: string;
   album?: string;
   duration?: number;
-  /** Present (and equal to "autoplay") only when the entry was appended
-   *  by the autoplay refill — the WebUI's "Clear ♾️ autoplay" button
-   *  enables when any track carries this. User-queued entries omit it. */
-  source?: "autoplay";
+  /** Provenance marker for tracks the user didn't queue directly:
+   *   - `"autoplay"` — appended by autoplay refill; "Clear ♾️ autoplay"
+   *     enables when any track carries this.
+   *   - `"playlist"` — bulk-enqueued from a stored playlist; pair with
+   *     `playlistId`. */
+  source?: "autoplay" | "playlist";
+  /** Stored-playlist id this entry came from, when `source === "playlist"`. */
+  playlistId?: string;
 }
 
 export type LoopMode = "off" | "track" | "queue";

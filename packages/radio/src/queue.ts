@@ -54,10 +54,16 @@ export interface Track {
   trackId?: string;
   /** Cover image URL (library metadata), for the WebUI now-playing card. */
   coverUrl?: string;
-  /** Set to `"autoplay"` only on entries appended by the autoplay refill,
-   *  so toggling autoplay off can wipe AI-added tracks without touching
-   *  the user's own queue. Absent on user-queued entries. */
-  source?: "autoplay";
+  /** Provenance marker for tracks the user didn't queue directly:
+   *   - `"autoplay"` — appended by the autoplay refill; wiped when the
+   *     user toggles autoplay off.
+   *   - `"playlist"` — bulk-enqueued from a stored playlist; pair with
+   *     `playlistId` to identify which.
+   *  Absent on user-queued entries. */
+  source?: "autoplay" | "playlist";
+  /** Stored-playlist id, when `source === "playlist"`. Lets the WebUI /
+   *  future "clear playlist tracks" affordance target a specific source. */
+  playlistId?: string;
   /**
    * The original *page* URL this track was sourced from — a YouTube /
    * SoundCloud / Bandcamp / … page, or a library track's download URL —
