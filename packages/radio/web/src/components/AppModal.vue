@@ -28,7 +28,13 @@ function onKey(e: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener("keydown", onKey));
-onUnmounted(() => window.removeEventListener("keydown", onKey));
+onUnmounted(() => {
+  window.removeEventListener("keydown", onKey);
+  // Release the body lock unconditionally — if the modal happened to be
+  // open when its host view unmounted (e.g. token expiry kicked the SPA
+  // to the denied view) the watcher below would never fire the unlock.
+  document.body.style.overflow = "";
+});
 
 // Lock body scroll while open.
 watch(
