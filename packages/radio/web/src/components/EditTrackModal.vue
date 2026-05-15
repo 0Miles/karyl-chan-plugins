@@ -38,9 +38,17 @@ function clearLocalPreview() {
   }
 }
 
+// Re-initialise on every visible: false → true edge rather than on
+// `props.track` changes. Watching the track alone misses re-opens of the
+// *same* track — Vue skips the callback when the ref points at the same
+// object — so stale local edits (e.g. cleared cover from a previous
+// cancel) leaked into the next open. Resetting on the open edge is
+// independent of which track the parent is targeting.
 watch(
-  () => props.track,
-  (t) => {
+  () => props.visible,
+  (now) => {
+    if (!now) return;
+    const t = props.track;
     if (!t) return;
     title.value = t.title || "";
     author.value = t.author || "";
@@ -59,11 +67,15 @@ function pickFile() {
 }
 
 function onFile(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+  const input = e.target as HTMLInputElement;
+  const f = input.files?.[0] ?? null;
+  // Always clear the input value so the same path can be re-selected
+  // later — without this, picking the same file twice in a row fires no
+  // `change` event the second time.
+  input.value = "";
   if (!f) return;
   if (f.size > 5 * 1024 * 1024) {
     error("Image must be ≤ 5 MB");
-    if (fileInput.value) fileInput.value.value = "";
     return;
   }
   clearLocalPreview();
