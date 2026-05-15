@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import AppButton from "../components/AppButton.vue";
 import Thumb from "../components/Thumb.vue";
 import TrackLink from "../components/TrackLink.vue";
@@ -15,8 +15,12 @@ const tracks = ref<LibraryTrack[]>([]);
 const dlUrl = ref("");
 const searchText = ref("");
 const downloading = ref(false);
+// Single source of truth for the edit modal: non-null means "open with
+// this track", null means closed. Avoids the easy-to-desync mistake of
+// updating the track ref but not the visible ref (or vice versa) when
+// adding new entry points.
 const editing = ref<LibraryTrack | null>(null);
-const editVisible = ref(false);
+const editVisible = computed(() => editing.value !== null);
 
 /**
  * In-flight downloads waiting to land in the library — rendered as
@@ -111,7 +115,9 @@ async function startDownload() {
 
 function openEdit(t: LibraryTrack) {
   editing.value = t;
-  editVisible.value = true;
+}
+function closeEdit() {
+  editing.value = null;
 }
 
 async function removeTrack(t: LibraryTrack) {
@@ -199,7 +205,7 @@ onBeforeUnmount(stopPolling);
   <EditTrackModal
     :track="editing"
     :visible="editVisible"
-    @close="editVisible = false"
+    @close="closeEdit"
     @saved="load"
   />
 </template>
