@@ -47,6 +47,39 @@ export interface LibraryTrack {
   sizeBytes: number | null;
 }
 
+/**
+ * Mirror of the server's Playlist (src/playlists.ts). A playlist is a
+ * named list of free-form source strings — each one is anything
+ * /radio play would accept (a library track id, a station key, a watch
+ * URL, …). Resolved through resolveAnyTrack at play time.
+ */
+export interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+  entries: string[];
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Preview shape returned by POST /api/playlists/lookup-entry — lets the
+ * editor show a friendly label / cover / metadata for an entry instead
+ * of the raw source string.
+ */
+export type PlaylistEntryInfo =
+  | {
+      kind: "library";
+      trackId: string;
+      label: string;
+      author?: string;
+      album?: string;
+      coverUrl?: string;
+    }
+  | { kind: "url"; label: string }
+  | { kind: "unknown"; label: string };
+
 export interface SessionSnapshot {
   guildId: string;
   channelId: string | null;

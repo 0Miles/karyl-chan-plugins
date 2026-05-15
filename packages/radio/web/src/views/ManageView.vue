@@ -4,12 +4,16 @@ import AppButton from "../components/AppButton.vue";
 import Thumb from "../components/Thumb.vue";
 import TrackLink from "../components/TrackLink.vue";
 import EditTrackModal from "../components/EditTrackModal.vue";
+import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
 import { fmtDur, fmtSize } from "../composables/use-format";
-import type { LibraryTrack } from "../types";
+import type { LibraryTrack, Playlist } from "../types";
 
 const { ok, error } = useToast();
+
+type Tab = "tracks" | "playlists";
+const activeTab = ref<Tab>("tracks");
 
 const tracks = ref<LibraryTrack[]>([]);
 const dlUrl = ref("");
@@ -21,6 +25,16 @@ const downloading = ref(false);
 // adding new entry points.
 const editing = ref<LibraryTrack | null>(null);
 const editVisible = computed(() => editing.value !== null);
+
+// Playlists tab. `editingPlaylist` follows the same single-ref pattern;
+// the extra `creating` flag distinguishes "open with null = create new"
+// from "closed" (modal isn't visible in either state without it).
+const playlists = ref<Playlist[]>([]);
+const editingPlaylist = ref<Playlist | null>(null);
+const creatingPlaylist = ref(false);
+const playlistEditVisible = computed(
+  () => creatingPlaylist.value || editingPlaylist.value !== null,
+);
 
 /**
  * In-flight downloads waiting to land in the library — rendered as
@@ -120,6 +134,44 @@ function closeEdit() {
   editing.value = null;
 }
 
+// ── Playlists ───────────────────────────────────────────────────────
+async function loadPlaylists(): Promise<void> {
+  try {
+    const r = await api<{ playlists: Playlist[] }>("GET", "/api/playlists");
+    playlists.value = r.playlists || [];
+  } catch (e: any) {
+    error(e.message);
+  }
+}
+
+function openCreatePlaylist(): void {
+  creatingPlaylist.value = true;
+  editingPlaylist.value = null;
+}
+function openEditPlaylist(p: Playlist): void {
+  creatingPlaylist.value = false;
+  editingPlaylist.value = p;
+}
+function closePlaylistEdit(): void {
+  creatingPlaylist.value = false;
+  editingPlaylist.value = null;
+}
+
+async function removePlaylist(p: Playlist): Promise<void> {
+  if (!confirm(`Delete playlist "${p.name}"?`)) return;
+  try {
+    await api("DELETE", "/api/playlists/" + encodeURIComponent(p.id));
+    ok("Playlist deleted");
+    loadPlaylists();
+  } catch (e: any) {
+    error(e.message);
+  }
+}
+
+function entryCountText(n: number): string {
+  return n === 1 ? "1 entry" : `${n} entries`;
+}
+
 async function removeTrack(t: LibraryTrack) {
   if (!confirm(`Delete "${t.title}"? This removes the audio file.`)) return;
   try {
@@ -137,70 +189,130 @@ function subText(t: LibraryTrack): string {
     .join(" · ");
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadPlaylists();
+});
 onBeforeUnmount(stopPolling);
 </script>
 
 <template>
-  <div class="card">
-    <form class="row" @submit.prevent="startDownload">
-      <input
-        v-model="dlUrl"
-        class="grow"
-        placeholder="URL to download — YouTube / SoundCloud / direct media (re-uses if already saved)"
-      />
-      <AppButton type="submit" :loading="downloading">⬇ Download</AppButton>
-    </form>
-  </div>
+  <nav class="tabs" role="tablist" aria-label="Manage sections">
+    <button
+      type="button"
+      role="tab"
+      :aria-selected="activeTab === 'tracks'"
+      :class="['tab', { 'tab--active': activeTab === 'tracks' }]"
+      @click="activeTab = 'tracks'"
+    >Tracks</button>
+    <button
+      type="button"
+      role="tab"
+      :aria-selected="activeTab === 'playlists'"
+      :class="['tab', { 'tab--active': activeTab === 'playlists' }]"
+      @click="activeTab = 'playlists'"
+    >Playlists</button>
+  </nav>
 
-  <div class="card">
-    <form class="row" @submit.prevent="load">
-      <input
-        v-model="searchText"
-        class="grow"
-        placeholder="Search title / album / author / URL…"
-      />
-      <AppButton variant="ghost" type="submit">Search</AppButton>
-    </form>
-  </div>
+  <template v-if="activeTab === 'tracks'">
+    <div class="card">
+      <form class="row" @submit.prevent="startDownload">
+        <input
+          v-model="dlUrl"
+          class="grow"
+          placeholder="URL to download — YouTube / SoundCloud / direct media (re-uses if already saved)"
+        />
+        <AppButton type="submit" :loading="downloading">⬇ Download</AppButton>
+      </form>
+    </div>
 
-  <section class="section">
-    <div class="section-title">Library</div>
-    <ul class="list">
-      <li
-        v-if="tracks.length === 0 && pendingDownloads.length === 0"
-        class="empty"
-      >No tracks.</li>
-      <li v-for="t in tracks" :key="t.id" class="item">
-        <Thumb :src="t.coverUrl" />
-        <div class="info">
-          <div class="name">
-            <TrackLink :label="t.title" :url="t.sourceUrl" />
+    <div class="card">
+      <form class="row" @submit.prevent="load">
+        <input
+          v-model="searchText"
+          class="grow"
+          placeholder="Search title / album / author / URL…"
+        />
+        <AppButton variant="ghost" type="submit">Search</AppButton>
+      </form>
+    </div>
+
+    <section class="section">
+      <div class="section-title">Library</div>
+      <ul class="list">
+        <li
+          v-if="tracks.length === 0 && pendingDownloads.length === 0"
+          class="empty"
+        >No tracks.</li>
+        <li v-for="t in tracks" :key="t.id" class="item">
+          <Thumb :src="t.coverUrl" />
+          <div class="info">
+            <div class="name">
+              <TrackLink :label="t.title" :url="t.sourceUrl" />
+            </div>
+            <div class="dim">{{ subText(t) || " " }}</div>
           </div>
-          <div class="dim">{{ subText(t) || " " }}</div>
-        </div>
-        <div class="actions">
-          <AppButton variant="ghost" size="sm" @click="openEdit(t)">
-            ✎ Edit
-          </AppButton>
-          <AppButton variant="danger" size="sm" @click="removeTrack(t)">
-            🗑
-          </AppButton>
-        </div>
-      </li>
-      <li
-        v-for="p in pendingDownloads"
-        :key="'dl-' + p.id"
-        class="item pending"
-      >
-        <div class="thumb thumb--sm thumb--placeholder">⏳</div>
-        <div class="info">
-          <div class="name">{{ p.url }}</div>
-          <div class="dim">downloading…</div>
-        </div>
-      </li>
-    </ul>
-  </section>
+          <div class="actions">
+            <AppButton variant="ghost" size="sm" @click="openEdit(t)">
+              ✎ Edit
+            </AppButton>
+            <AppButton variant="danger" size="sm" @click="removeTrack(t)">
+              🗑
+            </AppButton>
+          </div>
+        </li>
+        <li
+          v-for="p in pendingDownloads"
+          :key="'dl-' + p.id"
+          class="item pending"
+        >
+          <div class="thumb thumb--sm thumb--placeholder">⏳</div>
+          <div class="info">
+            <div class="name">{{ p.url }}</div>
+            <div class="dim">downloading…</div>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </template>
+
+  <template v-else>
+    <div class="card">
+      <div class="row">
+        <span class="grow muted intro">
+          Group library tracks, stations and URLs under a name —
+          <code>/radio play &lt;name&gt;</code> queues them all.
+        </span>
+        <AppButton @click="openCreatePlaylist">+ New playlist</AppButton>
+      </div>
+    </div>
+
+    <section class="section">
+      <div class="section-title">Playlists</div>
+      <ul class="list">
+        <li v-if="playlists.length === 0" class="empty">
+          No playlists yet.
+        </li>
+        <li v-for="p in playlists" :key="p.id" class="item">
+          <div class="thumb thumb--sm thumb--placeholder">🎼</div>
+          <div class="info">
+            <div class="name">{{ p.name }}</div>
+            <div class="dim">
+              {{ entryCountText(p.entries.length) }}{{ p.description ? " · " + p.description : "" }}
+            </div>
+          </div>
+          <div class="actions">
+            <AppButton variant="ghost" size="sm" @click="openEditPlaylist(p)">
+              ✎ Edit
+            </AppButton>
+            <AppButton variant="danger" size="sm" @click="removePlaylist(p)">
+              🗑
+            </AppButton>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </template>
 
   <EditTrackModal
     :track="editing"
@@ -208,9 +320,50 @@ onBeforeUnmount(stopPolling);
     @close="closeEdit"
     @saved="load"
   />
+
+  <EditPlaylistModal
+    :playlist="editingPlaylist"
+    :visible="playlistEditVisible"
+    :library="tracks"
+    @close="closePlaylistEdit"
+    @saved="loadPlaylists"
+  />
 </template>
 
 <style scoped>
+.tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  background: none;
+  border: none;
+  padding: 0.55rem 0.95rem;
+  font: inherit;
+  color: var(--text-muted);
+  font-weight: 550;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.tab:hover { color: var(--text); }
+.tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.intro code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-surface-2);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
 .item {
   display: flex;
   gap: 0.75rem;
