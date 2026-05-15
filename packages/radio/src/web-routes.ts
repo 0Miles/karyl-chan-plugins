@@ -62,9 +62,20 @@ import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import {
   isYouTubePlaylistUrl,
+  libraryTrackToTrack,
   resolveAnyTrack,
   resolvePlaylist,
+  resolveStoredPlaylist,
 } from "./resolver.js";
+import {
+  addPlaylist,
+  getPlaylist,
+  listPlaylists,
+  removePlaylist,
+  updatePlaylist,
+  type Playlist,
+  type PlaylistPatch,
+} from "./playlists.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const WEBUI_CAP = "webui.access";
@@ -506,6 +517,161 @@ export async function registerWebRoutes(
     },
   );
 
+  // ── Manage WebUI: playlists ──────────────────────────────────────────
+  //
+  // A playlist is a named, ordered list of source strings (anything
+  // /radio play accepts). At play time each entry is fed through the
+  // same resolveAnyTrack dispatch as the slash command — so a single
+  // playlist can mix library tracks, station keys, watch URLs and
+  // direct media URLs. Same auth gate as /api/tracks*.
+
+  server.get("/api/playlists", async (request, reply) => {
+    if (!authManageAccess(request, reply)) return;
+    const playlists = await listPlaylists();
+    return { playlists };
+  });
+
+  server.get<{ Params: { id: string } }>(
+    "/api/playlists/:id",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const playlist = await getPlaylist(request.params.id);
+      if (!playlist) return reply.code(404).send({ error: "Not found" });
+      return { playlist };
+    },
+  );
+
+  server.post("/api/playlists", async (request, reply) => {
+    const claims = authManageAccess(request, reply);
+    if (!claims) return;
+    let body: { name?: unknown; description?: unknown; entries?: unknown };
+    try {
+      body =
+        typeof request.body === "string"
+          ? JSON.parse(request.body)
+          : (request.body as typeof body);
+    } catch {
+      return reply.code(400).send({ error: "Invalid JSON" });
+    }
+    if (!body || typeof body !== "object") {
+      return reply.code(400).send({ error: "body must be an object" });
+    }
+    try {
+      const playlist = await addPlaylist({
+        name: body.name as string,
+        description: body.description as string | undefined,
+        entries: body.entries as string[] | undefined,
+        createdBy: claims.userId,
+      });
+      return { playlist };
+    } catch (err) {
+      return reply.code(400).send({
+        error: err instanceof Error ? err.message : "invalid input",
+      });
+    }
+  });
+
+  server.patch<{ Params: { id: string } }>(
+    "/api/playlists/:id",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      let body: PlaylistPatch;
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as PlaylistPatch);
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      if (!body || typeof body !== "object") {
+        return reply.code(400).send({ error: "body must be an object" });
+      }
+      try {
+        const playlist = await updatePlaylist(request.params.id, {
+          name: body.name,
+          description: body.description,
+          entries: body.entries,
+        });
+        if (!playlist) return reply.code(404).send({ error: "Not found" });
+        return { playlist };
+      } catch (err) {
+        return reply.code(400).send({
+          error: err instanceof Error ? err.message : "invalid input",
+        });
+      }
+    },
+  );
+
+  server.delete<{ Params: { id: string } }>(
+    "/api/playlists/:id",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const ok = await removePlaylist(request.params.id);
+      if (!ok) return reply.code(404).send({ error: "Not found" });
+      return { ok: true };
+    },
+  );
+
+  // Resolve a single source string into a preview — used by the playlist
+  // editor to show a friendly label / cover for each entry the admin
+  // pastes, so an opaque UUID or URL doesn't sit there raw. The endpoint
+  // never plays anything; it just tells the WebUI what /radio play would
+  // see for that string.
+  server.post("/api/playlists/lookup-entry", async (request, reply) => {
+    if (!authManageAccess(request, reply)) return;
+    let body: { source?: unknown };
+    try {
+      body =
+        typeof request.body === "string"
+          ? JSON.parse(request.body)
+          : (request.body as { source?: unknown });
+    } catch {
+      return reply.code(400).send({ error: "Invalid JSON" });
+    }
+    const source =
+      typeof body?.source === "string" ? body.source.trim() : "";
+    if (!source) return reply.code(400).send({ error: "Missing source" });
+
+    // Library hits resolve synchronously without yt-dlp; URL hits need
+    // network. The lookup follows resolveAnyTrack's dispatch order but
+    // never blocks on yt-dlp — for a URL we don't have downloaded yet
+    // we just echo back the URL as the label so the UI stays snappy.
+    const lib = await searchTracks("");
+    const direct =
+      lib.find((t) => t.id === source) ??
+      lib.find((t) =>
+        t.title.toLowerCase().includes(source.toLowerCase()),
+      );
+    if (direct) {
+      const track = libraryTrackToTrack(direct, null);
+      return {
+        kind: "library",
+        trackId: direct.id,
+        label: direct.title,
+        ...(direct.author ? { author: direct.author } : {}),
+        ...(direct.album ? { album: direct.album } : {}),
+        ...(track.coverUrl ? { coverUrl: track.coverUrl } : {}),
+      };
+    }
+    if (isHttpUrl(source)) {
+      const downloaded = await findBySourceUrl(source);
+      if (downloaded) {
+        const track = libraryTrackToTrack(downloaded, null);
+        return {
+          kind: "library",
+          trackId: downloaded.id,
+          label: downloaded.title,
+          ...(downloaded.author ? { author: downloaded.author } : {}),
+          ...(downloaded.album ? { album: downloaded.album } : {}),
+          ...(track.coverUrl ? { coverUrl: track.coverUrl } : {}),
+        };
+      }
+      return { kind: "url", label: source };
+    }
+    return { kind: "unknown", label: source };
+  });
+
   server.post("/api/tracks/download", async (request, reply) => {
     const claims = authManageAccess(request, reply);
     if (!claims) return;
@@ -826,18 +992,31 @@ export async function registerWebRoutes(
             .send({ error: "Playlist is empty or unavailable" });
         }
       } else {
-        let track: Track | null;
-        try {
-          track = await resolveAnyTrack(source, null);
-        } catch (err) {
-          return reply.code(400).send({
-            error: `Couldn't resolve that source: ${err instanceof Error ? err.message.slice(0, 200) : "error"}`,
-          });
+        // Stored playlist? Resolve it the same way the slash command
+        // does — single dispatch, mixed entry types — before falling
+        // back to a single source.
+        const stored = await resolveStoredPlaylist(source, null);
+        if (stored) {
+          if (stored.tracks.length === 0) {
+            return reply.code(400).send({
+              error: `Playlist "${stored.playlist.name}" has no playable entries`,
+            });
+          }
+          toQueue = stored.tracks;
+        } else {
+          let track: Track | null;
+          try {
+            track = await resolveAnyTrack(source, null);
+          } catch (err) {
+            return reply.code(400).send({
+              error: `Couldn't resolve that source: ${err instanceof Error ? err.message.slice(0, 200) : "error"}`,
+            });
+          }
+          if (!track) {
+            return reply.code(400).send({ error: "Unknown station/track/URL" });
+          }
+          toQueue = [track];
         }
-        if (!track) {
-          return reply.code(400).send({ error: "Unknown station/track/URL" });
-        }
-        toQueue = [track];
       }
       return withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
