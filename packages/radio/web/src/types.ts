@@ -23,6 +23,26 @@ export interface Track {
 
 export type LoopMode = "off" | "track" | "queue";
 
+/**
+ * Mirror of the server's LibraryTrack (src/library.ts) — kept here as
+ * its own copy so the WebUI bundle doesn't reach across into the
+ * server source tree. Drift between the two will surface in the
+ * /api/tracks responses; keep them in sync when adding fields.
+ */
+export interface LibraryTrack {
+  id: string;
+  filename: string;
+  title: string;
+  album?: string;
+  author?: string;
+  coverUrl?: string;
+  sourceUrl: string;
+  duration: number | null;
+  addedBy: string;
+  addedAt: number;
+  sizeBytes: number | null;
+}
+
 export interface SessionSnapshot {
   guildId: string;
   channelId: string | null;
