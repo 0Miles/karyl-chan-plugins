@@ -61,6 +61,7 @@ import {
   playTrack,
   resolveAnyTrack,
   resolvePlaylist,
+  resolveStoredPlaylist,
 } from "./resolver.js";
 
 /** Guilds the auto-advance loop ticks over. The SAME Set instance is
@@ -410,7 +411,7 @@ export default function buildPlugin() {
                     type: "string",
                     name: "source",
                     description:
-                      "Station key, library track title/ID, or http(s) URL",
+                      "Playlist name, station key, library track title/ID, or http(s) URL",
                     required: true,
                   },
                 ],
@@ -424,7 +425,7 @@ export default function buildPlugin() {
                     type: "string",
                     name: "source",
                     description:
-                      "Station key, library track title/ID, or http(s) URL",
+                      "Playlist name, station key, library track title/ID, or http(s) URL",
                     required: true,
                   },
                 ],
@@ -795,6 +796,23 @@ export default function buildPlugin() {
                         description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
                       });
                     }
+                    const stored = await resolveStoredPlaylist(source, userId);
+                    if (stored) {
+                      if (stored.tracks.length === 0) {
+                        return `⚠ Playlist **${stored.playlist.name}** has no playable entries${stored.skipped.length ? ` (${stored.skipped.length} couldn't be resolved)` : ""}.`;
+                      }
+                      for (const t of stored.tracks) {
+                        t.queuedByName = ctx.userDisplayName;
+                        enqueue(guildId, t);
+                      }
+                      await syncNowPlaying(guildId, ctx.botRpc);
+                      const skipNote = stored.skipped.length
+                        ? ` (${stored.skipped.length} entr${stored.skipped.length === 1 ? "y" : "ies"} skipped)`
+                        : "";
+                      return playbackReply(ctx, guildId, {
+                        description: `➕ Queued **${stored.tracks.length}** track${stored.tracks.length === 1 ? "" : "s"} from playlist **${stored.playlist.name}**${skipNote}.`,
+                      });
+                    }
                     const resolved = await resolveSourceOrError(source, userId);
                     if (typeof resolved === "string") return resolved;
                     resolved.queuedByName = ctx.userDisplayName;
@@ -871,6 +889,54 @@ export default function buildPlugin() {
                             ? `**${started.label}** — ${tracks.length} track${tracks.length === 1 ? "" : "s"} queued.`
                             : `Queued ${tracks.length} track${tracks.length === 1 ? "" : "s"}, but couldn't start the first one.`) +
                           autoNote,
+                        ...(started?.coverUrl
+                          ? { thumbnail: { url: started.coverUrl } }
+                          : {}),
+                      });
+                    }
+
+                    // Stored (admin-curated) playlist — same fresh-start shape
+                    // as the YouTube-list branch above, just sourced from
+                    // playlists.json. autoplay was already cleared at the top
+                    // of /play (`autoOn` is only true for YouTube list URLs).
+                    const stored = await resolveStoredPlaylist(source, userId);
+                    if (stored) {
+                      if (stored.tracks.length === 0) {
+                        return `⚠ Playlist **${stored.playlist.name}** has no playable entries${stored.skipped.length ? ` (${stored.skipped.length} couldn't be resolved)` : ""}.`;
+                      }
+                      const joinErr = await joinFirst();
+                      if (joinErr) return joinErr;
+                      clearQueue(guildId);
+                      for (const t of stored.tracks) {
+                        t.queuedByName = ctx.userDisplayName;
+                        enqueue(guildId, t);
+                      }
+                      let started: Track | null = null;
+                      for (let i = 0; i < 5 && !started; i++) {
+                        const candidate = peekNext(guildId);
+                        if (!candidate) break;
+                        const o = await startTrack(ctx, guildId, candidate.track);
+                        if (o.ok) {
+                          commitCursor(guildId, candidate.idx);
+                          started = o.track;
+                        } else if (o.reason === "play-failed") {
+                          break;
+                        } else {
+                          removeTrackAt(guildId, candidate.idx);
+                        }
+                      }
+                      await syncNowPlaying(guildId, ctx.botRpc);
+                      const skipNote = stored.skipped.length
+                        ? ` (${stored.skipped.length} skipped)`
+                        : "";
+                      return playbackReply(ctx, guildId, {
+                        title: started
+                          ? `▶️ Playing playlist: ${stored.playlist.name}`
+                          : `▶️ Playlist queued: ${stored.playlist.name}`,
+                        description:
+                          (started
+                            ? `**${started.label}** — ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"} queued${skipNote}.`
+                            : `Queued ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"}${skipNote}, but couldn't start the first one.`),
                         ...(started?.coverUrl
                           ? { thumbnail: { url: started.coverUrl } }
                           : {}),
