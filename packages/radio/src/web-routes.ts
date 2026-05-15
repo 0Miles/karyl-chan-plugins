@@ -9,6 +9,11 @@ import {
   verifyPluginSession,
   type PluginSessionClaims,
 } from "@karyl-chan/plugin-sdk";
+import {
+  issueManagePair,
+  verifyManageToken,
+  type ManageClaims,
+} from "./manage-tokens.js";
 import { getMusicDir, isHttpUrl } from "./downloader.js";
 import {
   downloadAndStore,
@@ -272,13 +277,41 @@ export async function registerWebRoutes(
     return claims;
   }
 
-  /** Manage-WebUI gate: token must carry `plugin:<key>:webui.access` (or `admin`). */
-  function authManage(
+  /** Manage bootstrap gate: bot's plugin-session JWT, capability-bearing.
+   *  Used only by /api/manage/exchange to mint plugin-side access+refresh. */
+  function authManageBootstrap(
     request: FastifyRequest,
     reply: FastifyReply,
   ): PluginSessionClaims | null {
     const claims = auth(request, reply);
     if (!claims) return null;
+    if (!hasPluginCapability(claims.capabilities, pluginKey, WEBUI_CAP)) {
+      reply.code(403).send({
+        error: `Missing capability plugin:${pluginKey}:${WEBUI_CAP} — ask an admin to grant it to your role.`,
+      });
+      return null;
+    }
+    return claims;
+  }
+
+  /** Manage gate for the day-to-day /api/tracks* routes: plugin-issued
+   *  access token only. The bot JWT is intentionally NOT accepted here
+   *  — clients have to exchange it once and then live on plugin tokens. */
+  function authManageAccess(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): ManageClaims | null {
+    const header = request.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+    if (!token) {
+      reply.code(401).send({ error: "Missing authorization" });
+      return null;
+    }
+    const claims = verifyManageToken(token, "manage-access");
+    if (!claims) {
+      reply.code(401).send({ error: "Invalid or expired access token" });
+      return null;
+    }
     if (!hasPluginCapability(claims.capabilities, pluginKey, WEBUI_CAP)) {
       reply.code(403).send({
         error: `Missing capability plugin:${pluginKey}:${WEBUI_CAP} — ask an admin to grant it to your role.`,
@@ -306,11 +339,60 @@ export async function registerWebRoutes(
   // Sync library with disk once on route registration.
   void syncWithDisk();
 
+  // ── Manage session tokens (plugin-issued, swap for bot JWT) ──────────
+  //
+  // The bot's plugin-session JWT (15 min) only crosses the wire once,
+  // here: the SPA reads it from `?token=`, POSTs to /exchange, and
+  // from then on lives on the plugin's own short-lived access token
+  // (5 min) + 1-day refresh — kept in sessionStorage so the tab can
+  // self-renew without going back to the bot. Process restart wipes
+  // the HMAC secret in manage-tokens.ts, so all outstanding manage
+  // sessions invalidate at once (the kill-switch).
+
+  server.post("/api/manage/exchange", async (request, reply) => {
+    const claims = authManageBootstrap(request, reply);
+    if (!claims) return;
+    // Carry only the manage-relevant subset; the bot already filtered
+    // session/other-plugin caps out before signing the JWT.
+    return issueManagePair(claims.userId, claims.capabilities ?? []);
+  });
+
+  server.post<{ Body: { refreshToken?: unknown } }>(
+    "/api/manage/refresh",
+    async (request, reply) => {
+      let body: { refreshToken?: unknown };
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { refreshToken?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      const refresh =
+        typeof body?.refreshToken === "string" ? body.refreshToken : null;
+      if (!refresh) {
+        return reply.code(400).send({ error: "refreshToken required" });
+      }
+      const claims = verifyManageToken(refresh, "manage-refresh");
+      if (!claims) {
+        return reply
+          .code(401)
+          .send({ error: "Invalid or expired refresh token" });
+      }
+      // Re-issue both halves on every refresh (stateless rotation): the
+      // refresh window stretches forward, capped at REFRESH_TTL_MS per
+      // call — so a tab kept open keeps refreshing, while a tab that
+      // sits idle past REFRESH_TTL_MS naturally lapses.
+      return issueManagePair(claims.userId, claims.capabilities);
+    },
+  );
+
   // ── Manage WebUI: library management ────────────────────────────────────
   server.get<{ Querystring: { q?: string } }>(
     "/api/tracks",
     async (request, reply) => {
-      if (!authManage(request, reply)) return;
+      if (!authManageAccess(request, reply)) return;
       const tracks = await searchTracks(request.query?.q ?? "");
       return { tracks };
     },
@@ -319,7 +401,7 @@ export async function registerWebRoutes(
   server.get<{ Params: { id: string } }>(
     "/api/tracks/:id",
     async (request, reply) => {
-      if (!authManage(request, reply)) return;
+      if (!authManageAccess(request, reply)) return;
       const track = await getTrack(request.params.id);
       if (!track) return reply.code(404).send({ error: "Not found" });
       return { track };
@@ -329,7 +411,7 @@ export async function registerWebRoutes(
   server.patch<{ Params: { id: string } }>(
     "/api/tracks/:id",
     async (request, reply) => {
-      if (!authManage(request, reply)) return;
+      if (!authManageAccess(request, reply)) return;
       let body: TrackMetadataPatch;
       try {
         body =
@@ -362,7 +444,7 @@ export async function registerWebRoutes(
   server.delete<{ Params: { id: string } }>(
     "/api/tracks/:id",
     async (request, reply) => {
-      if (!authManage(request, reply)) return;
+      if (!authManageAccess(request, reply)) return;
       const ok = await removeTrack(request.params.id);
       if (!ok) return reply.code(404).send({ error: "Not found" });
       return { ok: true };
@@ -375,7 +457,7 @@ export async function registerWebRoutes(
   server.post<{ Params: { id: string } }>(
     "/api/tracks/:id/cover",
     async (request, reply) => {
-      if (!authManage(request, reply)) return;
+      if (!authManageAccess(request, reply)) return;
       const id = request.params.id;
       const track = await getTrack(id);
       if (!track) return reply.code(404).send({ error: "Not found" });
@@ -420,7 +502,7 @@ export async function registerWebRoutes(
   );
 
   server.post("/api/tracks/download", async (request, reply) => {
-    const claims = authManage(request, reply);
+    const claims = authManageAccess(request, reply);
     if (!claims) return;
     let body: { url?: string };
     try {
@@ -494,7 +576,7 @@ export async function registerWebRoutes(
   });
 
   server.get("/api/downloads", async (request, reply) => {
-    if (!authManage(request, reply)) return;
+    if (!authManageAccess(request, reply)) return;
     return { downloads: Object.fromEntries(activeDownloads) };
   });
 

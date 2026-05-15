@@ -555,13 +555,12 @@ export default function buildPlugin() {
                     return formatStationList();
 
                   case "manage": {
+                    // 15-min bot JWT — only used to bootstrap a plugin-side
+                    // manage session (access + refresh) on first load; after
+                    // that the SPA refreshes itself for up to 1 day per tab.
                     const res = (await ctx.botRpc("/api/plugin/auth.session", {
                       user_id: userId,
                       kind: "manage",
-                      // Override the bot's 15-min manage-token default — the
-                      // admin WebUI involves browsing/searching/editing the
-                      // library, which routinely outruns 15 min in practice.
-                      ttl_ms: 60 * 60_000,
                     })) as { allowed?: boolean; token?: string } | null;
                     // botRpc returns null on a non-2xx (e.g. the bot hasn't
                     // approved this plugin's `auth.session` RPC scope yet), and a
@@ -584,7 +583,7 @@ export default function buildPlugin() {
                     }
                     return {
                       content:
-                        "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Link valid ~1 hour.",
+                        "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Open within 15 min; your tab session then refreshes itself for up to 1 day.",
                       components: [
                         linkButtonRow(
                           "🔧 Open admin WebUI",
