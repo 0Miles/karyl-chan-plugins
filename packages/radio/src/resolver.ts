@@ -232,10 +232,23 @@ export async function resolveStoredPlaylist(
   const skipped: string[] = [];
   for (const entry of playlist.entries) {
     let resolved: Track | null;
-    try {
-      resolved = await resolveAnyTrack(entry, userId);
-    } catch {
-      resolved = null;
+    // URL entries get the same lazy treatment as YouTube playlist
+    // expansions — we don't want to spend N × yt-dlp seconds under
+    // the guild lock just to load a playlist. The advance loop /
+    // playTrack will resolve a fresh stream URL right before playback.
+    // Library / station keys / titles are resolved eagerly because
+    // they're cheap (local cache lookup, no network).
+    if (isHttpUrl(entry)) {
+      const downloaded = await findBySourceUrl(entry);
+      resolved = downloaded
+        ? libraryTrackToTrack(downloaded, userId)
+        : { url: entry, label: entry, queuedBy: userId, needsResolve: true };
+    } else {
+      try {
+        resolved = await resolveAnyTrack(entry, userId);
+      } catch {
+        resolved = null;
+      }
     }
     if (!resolved) {
       skipped.push(entry);
