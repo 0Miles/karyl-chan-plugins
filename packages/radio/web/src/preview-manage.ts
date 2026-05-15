@@ -2,7 +2,7 @@ import { createApp, h } from "vue";
 import "./styles/global.css";
 import ManageView from "./views/ManageView.vue";
 import AppToast from "./components/AppToast.vue";
-import type { LibraryTrack } from "./types";
+import type { LibraryTrack, Playlist, PlaylistEntryInfo } from "./types";
 
 // Stand-alone preview of the ManageView edit-track flow. All HTTP calls
 // the SPA would normally make are intercepted by a fake `fetch` so this
@@ -71,6 +71,20 @@ for (const t of tracks) {
   if (t.coverUrl && coverFor[t.coverUrl]) t.coverUrl = coverFor[t.coverUrl];
 }
 
+// Seed a few playlists so the Playlists tab has something to render.
+const playlists: Playlist[] = [
+  {
+    id: "pl-1",
+    name: "Late night",
+    description: "Slow-burn picks for after midnight",
+    entries: ["trk-a", "trk-b", "https://example.com/external"],
+    createdBy: "preview",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+  },
+];
+let nextPlaylistId = 2;
+
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url =
@@ -111,6 +125,81 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.endsWith("/api/tracks/download") && method === "POST") {
     return json({ alreadyExisted: false });
   }
+
+  // ── Playlists ───────────────────────────────────────────────────────
+  if (url.endsWith("/api/playlists") && method === "GET") {
+    return json({ playlists });
+  }
+  if (url.endsWith("/api/playlists") && method === "POST") {
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const name = String(body.name ?? "").trim();
+    if (!name) return json({ error: "name is required" }, 400);
+    if (playlists.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+      return json({ error: `A playlist named "${name}" already exists` }, 400);
+    }
+    const now = Date.now();
+    const playlist: Playlist = {
+      id: `pl-${nextPlaylistId++}`,
+      name,
+      ...(body.description ? { description: String(body.description) } : {}),
+      entries: Array.isArray(body.entries)
+        ? body.entries.map(String).filter((s: string) => s.trim())
+        : [],
+      createdBy: "preview",
+      createdAt: now,
+      updatedAt: now,
+    };
+    playlists.push(playlist);
+    return json({ playlist });
+  }
+  const plIdMatch = url.match(/\/api\/playlists\/([^/]+)$/);
+  if (plIdMatch && method === "PATCH") {
+    const id = decodeURIComponent(plIdMatch[1]);
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const p = playlists.find((x) => x.id === id);
+    if (!p) return json({ error: "Not found" }, 404);
+    if (body.name !== undefined) p.name = String(body.name).trim();
+    if (body.description !== undefined) {
+      const d = String(body.description ?? "").trim();
+      if (d) p.description = d;
+      else delete p.description;
+    }
+    if (body.entries !== undefined) {
+      p.entries = Array.isArray(body.entries)
+        ? body.entries.map(String).filter((s: string) => s.trim())
+        : [];
+    }
+    p.updatedAt = Date.now();
+    return json({ playlist: p });
+  }
+  if (plIdMatch && method === "DELETE") {
+    const id = decodeURIComponent(plIdMatch[1]);
+    const idx = playlists.findIndex((x) => x.id === id);
+    if (idx === -1) return json({ error: "Not found" }, 404);
+    playlists.splice(idx, 1);
+    return json({ ok: true });
+  }
+  if (url.endsWith("/api/playlists/lookup-entry") && method === "POST") {
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const source = String(body.source ?? "").trim();
+    const lib = tracks.find((t) => t.id === source);
+    if (lib) {
+      const info: PlaylistEntryInfo = {
+        kind: "library",
+        trackId: lib.id,
+        label: lib.title,
+        ...(lib.author ? { author: lib.author } : {}),
+        ...(lib.album ? { album: lib.album } : {}),
+        ...(lib.coverUrl ? { coverUrl: lib.coverUrl } : {}),
+      };
+      return json(info);
+    }
+    if (/^https?:\/\//.test(source)) {
+      return json({ kind: "url", label: source });
+    }
+    return json({ kind: "unknown", label: source });
+  }
+
   // Fallback: pass through (shouldn't normally happen in preview).
   return originalFetch(input, init);
 };
