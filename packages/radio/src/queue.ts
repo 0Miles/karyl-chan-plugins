@@ -490,3 +490,19 @@ export function purgeTrackId(trackId: string): number {
   }
   return removed;
 }
+
+/**
+ * Counterpart to `purgeTrackId` for stored playlists: drop every track
+ * a deleted playlist had pushed onto any guild queue (matched via
+ * `playlistId`). Called from `removePlaylist` so a deleted playlist
+ * leaves no orphan entries with stale provenance behind. Same
+ * cursor-anchoring + empty-queue loop reset as `purgeTrackId`.
+ */
+export function purgePlaylistId(playlistId: string): number {
+  let removed = 0;
+  for (const s of states.values()) {
+    removed += filterTracks(s, (t) => t.playlistId === playlistId);
+    if (s.tracks.length === 0) s.loop = "off";
+  }
+  return removed;
+}

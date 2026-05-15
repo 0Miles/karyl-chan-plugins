@@ -2,6 +2,7 @@ import { readFile, writeFile, rename } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { ensureMusicDir, getMusicDir } from "./downloader.js";
+import { purgePlaylistId } from "./queue.js";
 
 /**
  * User-curated playlists — an admin names a list and pastes / picks a
@@ -213,6 +214,9 @@ export function removePlaylist(id: string): Promise<boolean> {
     const idx = data.playlists.findIndex((p) => p.id === id);
     if (idx === -1) return false;
     data.playlists.splice(idx, 1);
+    // Drop any queue entries this playlist had pushed onto live sessions
+    // so the deleted id doesn't sit there as dangling provenance.
+    purgePlaylistId(id);
     await save();
     return true;
   });
