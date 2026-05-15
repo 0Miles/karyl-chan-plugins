@@ -280,9 +280,13 @@ async function save(): Promise<void> {
           ref="listEl"
           class="entry-list"
         >
+          <!-- Key by index, not by source: server enforces uniqueness so
+               duplicates shouldn't ship, but if a future code path lets
+               them in, identical :key values would silently misorder
+               rows after a drag (Vue would recycle the wrong node). -->
           <li
             v-for="(src, i) in entries"
-            :key="src"
+            :key="i"
             class="entry"
             :class="{ 'entry--unknown': previews[src]?.kind === 'unknown' }"
           >
