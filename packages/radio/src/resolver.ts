@@ -28,6 +28,7 @@ import {
   youtubeVideoIdFromUrl,
 } from "./downloader.js";
 import { findBySourceUrl, getTrack, searchTracks } from "./library.js";
+import { findPlaylistByName, type Playlist } from "./playlists.js";
 import { resolveTrack } from "./format.js";
 
 /**
@@ -204,6 +205,47 @@ export async function resolvePlaylist(
     queuedBy: userId,
     needsResolve: true,
   }));
+}
+
+/**
+ * Resolve a stored playlist by name into queue-ready Tracks. Each entry
+ * is fed through `resolveAnyTrack` (the same dispatch as `/radio play`),
+ * so a single playlist can mix library tracks, station keys, URLs and
+ * YouTube videos. Failed entries are reported in `skipped` and dropped
+ * — one dead link or a since-deleted library track shouldn't block the
+ * rest of the list.
+ *
+ * Returns `null` when no playlist by that name exists; callers fall back
+ * to single-source resolution.
+ */
+export async function resolveStoredPlaylist(
+  name: string,
+  userId: string | null,
+): Promise<{
+  playlist: Playlist;
+  tracks: Track[];
+  skipped: string[];
+} | null> {
+  const playlist = await findPlaylistByName(name);
+  if (!playlist) return null;
+  const tracks: Track[] = [];
+  const skipped: string[] = [];
+  for (const entry of playlist.entries) {
+    let resolved: Track | null;
+    try {
+      resolved = await resolveAnyTrack(entry, userId);
+    } catch {
+      resolved = null;
+    }
+    if (!resolved) {
+      skipped.push(entry);
+      continue;
+    }
+    resolved.source = "playlist";
+    resolved.playlistId = playlist.id;
+    tracks.push(resolved);
+  }
+  return { playlist, tracks, skipped };
 }
 
 /**
