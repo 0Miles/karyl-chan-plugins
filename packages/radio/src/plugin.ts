@@ -206,6 +206,41 @@ function startTrack(
   );
 }
 
+/**
+ * `/radio play` shared tail for any multi-track source (YouTube
+ * playlist URL, stored playlist, …): clearQueue, bulk-enqueue, then try
+ * to start the first resolvable track in a 5-attempt loop. Returns the
+ * track that actually started, or null if nothing did (caller decides
+ * how to phrase the reply).
+ *
+ * Callers have already done `joinFirst()` and stamped \`queuedByName\` on
+ * each track; everything here is "what /radio play does once we have
+ * the expanded Track[] and a voice connection".
+ */
+async function playBulk(
+  ctx: CommandContext,
+  guildId: string,
+  tracks: Track[],
+): Promise<Track | null> {
+  clearQueue(guildId);
+  for (const t of tracks) enqueue(guildId, t);
+  let started: Track | null = null;
+  for (let i = 0; i < 5 && !started; i++) {
+    const candidate = peekNext(guildId);
+    if (!candidate) break;
+    const o = await startTrack(ctx, guildId, candidate.track);
+    if (o.ok) {
+      commitCursor(guildId, candidate.idx);
+      started = o.track;
+    } else if (o.reason === "play-failed") {
+      break; // cursor unchanged; advance loop will retry
+    } else {
+      removeTrackAt(guildId, candidate.idx);
+    }
+  }
+  return started;
+}
+
 function parseSource(ctx: CommandContext): string {
   return typeof ctx.options.source === "string" ? ctx.options.source : "";
 }
@@ -857,28 +892,10 @@ export default function buildPlugin() {
                         return "⚠ That playlist is empty or unavailable.";
                       const joinErr = await joinFirst();
                       if (joinErr) return joinErr;
+                      for (const t of tracks) t.queuedByName = ctx.userDisplayName;
                       // `play` is a fresh start — drop whatever was queued
                       // before loading this playlist (use `queue` to append).
-                      clearQueue(guildId);
-                      for (const t of tracks) {
-                        t.queuedByName = ctx.userDisplayName;
-                        enqueue(guildId, t);
-                      }
-                      // Start the first that resolves (skip a few dead ones).
-                      let started: Track | null = null;
-                      for (let i = 0; i < 5 && !started; i++) {
-                        const candidate = peekNext(guildId);
-                        if (!candidate) break;
-                        const o = await startTrack(ctx, guildId, candidate.track);
-                        if (o.ok) {
-                          commitCursor(guildId, candidate.idx);
-                          started = o.track;
-                        } else if (o.reason === "play-failed") {
-                          break; // cursor unchanged; advance loop will retry
-                        } else {
-                          removeTrackAt(guildId, candidate.idx);
-                        }
-                      }
+                      const started = await playBulk(ctx, guildId, tracks);
                       await syncNowPlaying(guildId, ctx.botRpc);
                       return playbackReply(ctx, guildId, {
                         title: started
@@ -906,25 +923,8 @@ export default function buildPlugin() {
                       }
                       const joinErr = await joinFirst();
                       if (joinErr) return joinErr;
-                      clearQueue(guildId);
-                      for (const t of stored.tracks) {
-                        t.queuedByName = ctx.userDisplayName;
-                        enqueue(guildId, t);
-                      }
-                      let started: Track | null = null;
-                      for (let i = 0; i < 5 && !started; i++) {
-                        const candidate = peekNext(guildId);
-                        if (!candidate) break;
-                        const o = await startTrack(ctx, guildId, candidate.track);
-                        if (o.ok) {
-                          commitCursor(guildId, candidate.idx);
-                          started = o.track;
-                        } else if (o.reason === "play-failed") {
-                          break;
-                        } else {
-                          removeTrackAt(guildId, candidate.idx);
-                        }
-                      }
+                      for (const t of stored.tracks) t.queuedByName = ctx.userDisplayName;
+                      const started = await playBulk(ctx, guildId, stored.tracks);
                       await syncNowPlaying(guildId, ctx.botRpc);
                       const skipNote = stored.skipped.length
                         ? ` (${stored.skipped.length} skipped)`
@@ -936,7 +936,8 @@ export default function buildPlugin() {
                         description:
                           (started
                             ? `**${started.label}** — ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"} queued${skipNote}.`
-                            : `Queued ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"}${skipNote}, but couldn't start the first one.`),
+                            : `Queued ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"}${skipNote}, but couldn't start the first one.`) +
+                          autoNote,
                         ...(started?.coverUrl
                           ? { thumbnail: { url: started.coverUrl } }
                           : {}),
