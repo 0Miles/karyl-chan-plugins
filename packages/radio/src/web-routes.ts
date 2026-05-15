@@ -486,7 +486,11 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "Empty file" });
       }
       const filename = await saveCover(id, buf, ext);
-      const coverUrl = `${getEffectiveBase()}/cover/${filename}`;
+      // Append a cache-busting query param keyed on upload time. Without
+      // it, replacing a cover with another of the same mimetype yields
+      // an identical `<id>.<ext>` URL and browsers happily serve the
+      // stale image from disk cache.
+      const coverUrl = `${getEffectiveBase()}/cover/${filename}?v=${Date.now()}`;
       try {
         const updated = await updateTrack(id, { coverUrl });
         return { track: updated };
