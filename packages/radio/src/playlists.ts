@@ -190,23 +190,26 @@ export async function updatePlaylist(
     .prepare("SELECT 1 AS x FROM playlists WHERE id = ?")
     .get(id);
   if (!exists) return null;
-  const now = Date.now();
   const tx = db.transaction(() => {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
     if (patch.name !== undefined) {
-      const name = validateName(patch.name, id);
-      db.prepare("UPDATE playlists SET name = ? WHERE id = ?").run(name, id);
+      sets.push("name = ?");
+      vals.push(validateName(patch.name, id));
     }
     if (patch.description !== undefined) {
-      const v = validateDescription(patch.description);
-      db.prepare("UPDATE playlists SET description = ? WHERE id = ?").run(
-        v ?? null,
-        id,
-      );
+      sets.push("description = ?");
+      vals.push(validateDescription(patch.description) ?? null);
     }
     if (patch.entries !== undefined) {
       writeEntries(id, validateEntries(patch.entries));
     }
-    db.prepare("UPDATE playlists SET updated_at = ? WHERE id = ?").run(now, id);
+    sets.push("updated_at = ?");
+    vals.push(Date.now());
+    vals.push(id);
+    db.prepare(`UPDATE playlists SET ${sets.join(", ")} WHERE id = ?`).run(
+      ...vals,
+    );
   });
   tx();
   return getPlaylist(id);

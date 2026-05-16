@@ -109,13 +109,16 @@ export async function removeTrack(id: string): Promise<boolean> {
     .prepare("SELECT filename FROM tracks WHERE id = ?")
     .get(id) as { filename: string } | undefined;
   if (!row) return false;
-  getDb().prepare("DELETE FROM tracks WHERE id = ?").run(id);
+  // Unlink before the DB delete so a crash in between leaves the row
+  // pointing at a missing file (which `syncWithDisk` reaps on next
+  // boot) rather than orphaning the file with no row to find it.
   try {
     await unlink(join(getMusicDir(), row.filename));
   } catch {
     // file already gone
   }
   await deleteCoverFor(id);
+  getDb().prepare("DELETE FROM tracks WHERE id = ?").run(id);
   // Drop any ghost references from playback queues so a now-missing
   // file doesn't sit un-playable in someone's queue.
   purgeTrackId(id);

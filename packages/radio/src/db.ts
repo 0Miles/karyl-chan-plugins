@@ -88,8 +88,19 @@ function migrate(conn: DB): void {
  */
 function importLegacyJson(conn: DB): void {
   const dir = getMusicDir();
-  importLegacyTracks(conn, join(dir, "library.json"));
-  importLegacyPlaylists(conn, join(dir, "playlists.json"));
+  // A malformed legacy file mustn't take the plugin down — log + skip
+  // so the DB opens cleanly. The original JSON stays in place (no
+  // rename) so the user can inspect and retry manually.
+  try {
+    importLegacyTracks(conn, join(dir, "library.json"));
+  } catch (err) {
+    console.error("[radio] library.json import failed; skipping:", err);
+  }
+  try {
+    importLegacyPlaylists(conn, join(dir, "playlists.json"));
+  } catch (err) {
+    console.error("[radio] playlists.json import failed; skipping:", err);
+  }
 }
 
 function importLegacyTracks(conn: DB, path: string): void {
@@ -168,7 +179,7 @@ function importLegacyPlaylists(conn: DB, path: string): void {
       const entries = Array.isArray(r.entries) ? r.entries : [];
       for (let i = 0; i < entries.length; i++) {
         const v = entries[i];
-        if (typeof v === "string") insertEntry.run(r.id, i, v);
+        if (typeof v === "string") insertEntry.run(String(r.id), i, v);
       }
     }
   });
