@@ -1,8 +1,6 @@
-import { readFile, writeFile, rename } from "fs/promises";
-import { join } from "path";
 import { randomUUID } from "crypto";
-import { ensureMusicDir, getMusicDir } from "./downloader.js";
 import { purgePlaylistId } from "./queue.js";
+import { getDb } from "./db.js";
 
 /**
  * User-curated playlists — an admin names a list and pastes / picks a
@@ -11,9 +9,8 @@ import { purgePlaylistId } from "./queue.js";
  * each entry is resolved through the same dispatch as the slash
  * command, and the resulting Tracks are bulk-enqueued.
  *
- * Lives alongside library.json under MUSIC_DIR — same serialized-write
- * + atomic-rename pattern as library.ts, but its own file so editing
- * a playlist never racks the library cache or risks corrupting it.
+ * Backed by the shared SQLite DB next to the audio files. `playlists`
+ * holds metadata, `playlist_entries` holds ordered source strings.
  */
 
 export interface Playlist {
@@ -40,48 +37,38 @@ export interface PlaylistPatch {
   entries?: string[];
 }
 
-interface PlaylistData {
-  playlists: Playlist[];
-}
-
-const PLAYLISTS_FILE = "playlists.json";
 const MAX_NAME = 80;
 const MAX_DESC = 500;
 const MAX_ENTRY = 500;
 const MAX_ENTRIES = 500;
 
-let cache: PlaylistData | null = null;
-let writeLock: Promise<void> = Promise.resolve();
-
-function playlistPath(): string {
-  return join(getMusicDir(), PLAYLISTS_FILE);
+interface PlaylistRow {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string;
+  created_at: number;
+  updated_at: number;
 }
 
-async function load(): Promise<PlaylistData> {
-  if (cache) return cache;
-  try {
-    const raw = await readFile(playlistPath(), "utf-8");
-    cache = JSON.parse(raw) as PlaylistData;
-  } catch {
-    cache = { playlists: [] };
-  }
-  return cache;
-}
-
-async function save(): Promise<void> {
-  await ensureMusicDir();
-  const tmp = playlistPath() + ".tmp";
-  await writeFile(tmp, JSON.stringify(cache, null, 2));
-  await rename(tmp, playlistPath());
-}
-
-function serialized<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = writeLock;
-  let resolve: () => void;
-  writeLock = new Promise((r) => {
-    resolve = r;
-  });
-  return prev.then(fn).finally(() => resolve!());
+function hydrate(row: PlaylistRow): Playlist {
+  const entries = (
+    getDb()
+      .prepare(
+        "SELECT value FROM playlist_entries WHERE playlist_id = ? ORDER BY position",
+      )
+      .all(row.id) as Array<{ value: string }>
+  ).map((r) => r.value);
+  const p: Playlist = {
+    id: row.id,
+    name: row.name,
+    entries,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  if (row.description) p.description = row.description;
+  return p;
 }
 
 function normaliseName(s: string): string {
@@ -106,11 +93,7 @@ function validateEntries(entries: unknown): string[] {
   return out;
 }
 
-function validateName(
-  name: unknown,
-  data: PlaylistData,
-  excludeId?: string,
-): string {
+function validateName(name: unknown, excludeId?: string): string {
   if (typeof name !== "string") throw new Error("name must be a string");
   const trimmed = name.trim();
   if (!trimmed) throw new Error("name is required");
@@ -118,9 +101,11 @@ function validateName(
     throw new Error(`name too long (max ${MAX_NAME})`);
   }
   const key = normaliseName(trimmed);
-  const clash = data.playlists.find(
-    (p) => normaliseName(p.name) === key && p.id !== excludeId,
-  );
+  const clash = getDb()
+    .prepare(
+      "SELECT name FROM playlists WHERE lower(name) = ? AND id IS NOT ? LIMIT 1",
+    )
+    .get(key, excludeId ?? null) as { name: string } | undefined;
   if (clash) throw new Error(`A playlist named "${clash.name}" already exists`);
   return trimmed;
 }
@@ -137,13 +122,17 @@ function validateDescription(desc: unknown): string | undefined {
 }
 
 export async function listPlaylists(): Promise<Playlist[]> {
-  const data = await load();
-  return data.playlists;
+  const rows = getDb()
+    .prepare("SELECT * FROM playlists ORDER BY created_at")
+    .all() as PlaylistRow[];
+  return rows.map(hydrate);
 }
 
 export async function getPlaylist(id: string): Promise<Playlist | null> {
-  const data = await load();
-  return data.playlists.find((p) => p.id === id) ?? null;
+  const row = getDb()
+    .prepare("SELECT * FROM playlists WHERE id = ?")
+    .get(id) as PlaylistRow | undefined;
+  return row ? hydrate(row) : null;
 }
 
 /** Case-insensitive name lookup — the slash-command entry point. */
@@ -152,72 +141,83 @@ export async function findPlaylistByName(
 ): Promise<Playlist | null> {
   const key = normaliseName(name);
   if (!key) return null;
-  const data = await load();
-  return data.playlists.find((p) => normaliseName(p.name) === key) ?? null;
+  const row = getDb()
+    .prepare("SELECT * FROM playlists WHERE lower(name) = ? LIMIT 1")
+    .get(key) as PlaylistRow | undefined;
+  return row ? hydrate(row) : null;
 }
 
-export function addPlaylist(input: {
+function writeEntries(playlistId: string, entries: string[]): void {
+  const db = getDb();
+  db.prepare("DELETE FROM playlist_entries WHERE playlist_id = ?").run(
+    playlistId,
+  );
+  const insert = db.prepare(
+    "INSERT INTO playlist_entries (playlist_id, position, value) VALUES (?, ?, ?)",
+  );
+  for (let i = 0; i < entries.length; i++) insert.run(playlistId, i, entries[i]);
+}
+
+export async function addPlaylist(input: {
   name: string;
   description?: string;
   entries?: string[];
   createdBy: string;
 }): Promise<Playlist> {
-  return serialized(async () => {
-    const data = await load();
-    const name = validateName(input.name, data);
+  const db = getDb();
+  const id = randomUUID();
+  const now = Date.now();
+  const tx = db.transaction(() => {
+    const name = validateName(input.name);
     const description = validateDescription(input.description);
     const entries = validateEntries(input.entries ?? []);
-    const now = Date.now();
-    const playlist: Playlist = {
-      id: randomUUID(),
-      name,
-      ...(description ? { description } : {}),
-      entries,
-      createdBy: input.createdBy,
-      createdAt: now,
-      updatedAt: now,
-    };
-    data.playlists.push(playlist);
-    await save();
-    return playlist;
+    db.prepare(
+      `INSERT INTO playlists (id, name, description, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(id, name, description ?? null, input.createdBy, now, now);
+    writeEntries(id, entries);
   });
+  tx();
+  return (await getPlaylist(id))!;
 }
 
-export function updatePlaylist(
+export async function updatePlaylist(
   id: string,
   patch: PlaylistPatch,
 ): Promise<Playlist | null> {
-  return serialized(async () => {
-    const data = await load();
-    const playlist = data.playlists.find((p) => p.id === id);
-    if (!playlist) return null;
+  const db = getDb();
+  const exists = db
+    .prepare("SELECT 1 AS x FROM playlists WHERE id = ?")
+    .get(id);
+  if (!exists) return null;
+  const now = Date.now();
+  const tx = db.transaction(() => {
     if (patch.name !== undefined) {
-      playlist.name = validateName(patch.name, data, id);
+      const name = validateName(patch.name, id);
+      db.prepare("UPDATE playlists SET name = ? WHERE id = ?").run(name, id);
     }
     if (patch.description !== undefined) {
       const v = validateDescription(patch.description);
-      if (v) playlist.description = v;
-      else delete playlist.description;
+      db.prepare("UPDATE playlists SET description = ? WHERE id = ?").run(
+        v ?? null,
+        id,
+      );
     }
     if (patch.entries !== undefined) {
-      playlist.entries = validateEntries(patch.entries);
+      writeEntries(id, validateEntries(patch.entries));
     }
-    playlist.updatedAt = Date.now();
-    await save();
-    return playlist;
+    db.prepare("UPDATE playlists SET updated_at = ? WHERE id = ?").run(now, id);
   });
+  tx();
+  return getPlaylist(id);
 }
 
-export function removePlaylist(id: string): Promise<boolean> {
-  return serialized(async () => {
-    const data = await load();
-    const idx = data.playlists.findIndex((p) => p.id === id);
-    if (idx === -1) return false;
-    data.playlists.splice(idx, 1);
-    // Drop any queue entries this playlist had pushed onto live sessions
-    // so the deleted id doesn't sit there as dangling provenance.
-    purgePlaylistId(id);
-    await save();
-    return true;
-  });
+export async function removePlaylist(id: string): Promise<boolean> {
+  // ON DELETE CASCADE on playlist_entries drops the rows; no manual cleanup.
+  const info = getDb().prepare("DELETE FROM playlists WHERE id = ?").run(id);
+  if (info.changes === 0) return false;
+  // Drop any queue entries this playlist had pushed onto live sessions
+  // so the deleted id doesn't sit there as dangling provenance.
+  purgePlaylistId(id);
+  return true;
 }

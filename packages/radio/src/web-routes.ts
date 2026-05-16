@@ -80,7 +80,7 @@ import {
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const WEBUI_CAP = "webui.access";
 /** Files in the music dir that are NOT audio and must never be streamed. */
-const NON_AUDIO_RE = /(^library\.json$)|(\.tmp$)/;
+const NON_AUDIO_RE = /(^library\.json(\.migrated)?$)|(^playlists\.json(\.migrated)?$)|(^radio\.db(-wal|-shm)?$)|(\.tmp$)/;
 
 // ── Deferred wiring from index.ts ─────────────────────────────────────────
 // The WebUI routes need things the SDK only produces *after* start()

@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { mkdir } from "fs/promises";
+import { mkdirSync } from "fs";
 import { join } from "path";
 
 export interface DownloadResult {
@@ -39,6 +40,10 @@ export function getMusicDir(): string {
 
 export async function ensureMusicDir(): Promise<void> {
   await mkdir(MUSIC_DIR, { recursive: true });
+}
+
+export function ensureMusicDirSync(): void {
+  mkdirSync(MUSIC_DIR, { recursive: true });
 }
 
 /** Characters that are illegal in file names on common filesystems. */
