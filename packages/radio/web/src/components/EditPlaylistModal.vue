@@ -29,9 +29,20 @@ const emit = defineEmits<{
 const { ok, error } = useToast();
 
 // ── form state ────────────────────────────────────────────────────────
+// Each row carries a per-modal-instance `uid` independent of `src` so
+// SortableJS reorders can use stable :key values. With `:key="i"` Vue
+// would patch content in place (the keys 0..n match before/after the
+// splice) while leaving the post-drag DOM order set by SortableJS —
+// the visual result was the dragged row appearing at the wrong index.
+let nextEntryUid = 1;
+interface EntryRow { uid: number; src: string }
+function wrapEntries(srcs: readonly string[]): EntryRow[] {
+  return srcs.map((src) => ({ uid: nextEntryUid++, src }));
+}
+
 const name = ref("");
 const description = ref("");
-const entries = ref<string[]>([]);
+const entries = ref<EntryRow[]>([]);
 const previews = ref<Record<string, PlaylistEntryInfo>>({});
 const saving = ref(false);
 
@@ -55,7 +66,7 @@ const libraryById = computed(() => {
  *  exact id match — pasting a sourceUrl that resolves to a library
  *  track is still allowed; that's a deliberate user choice). */
 const pickerCandidates = computed(() => {
-  const have = new Set(entries.value);
+  const have = new Set(entries.value.map((e) => e.src));
   const q = pickerSearch.value.trim().toLowerCase();
   return props.library.filter((t) => {
     if (have.has(t.id)) return false;
@@ -79,7 +90,7 @@ watch(
     const p = props.playlist;
     name.value = p?.name ?? "";
     description.value = p?.description ?? "";
-    entries.value = p ? [...p.entries] : [];
+    entries.value = wrapEntries(p?.entries ?? []);
     previews.value = {};
     pasteOpen.value = false;
     pasteText.value = "";
@@ -87,7 +98,7 @@ watch(
     pickerSearch.value = "";
     saving.value = false;
     // Prime previews for everything we just loaded.
-    for (const e of entries.value) primePreview(e);
+    for (const e of entries.value) primePreview(e.src);
   },
 );
 
@@ -148,11 +159,11 @@ function entryCover(source: string): string | undefined {
 function addEntry(source: string): void {
   const s = source.trim();
   if (!s) return;
-  if (entries.value.includes(s)) {
+  if (entries.value.some((e) => e.src === s)) {
     error(`"${s}" is already in this playlist`);
     return;
   }
-  entries.value = [...entries.value, s];
+  entries.value = [...entries.value, { uid: nextEntryUid++, src: s }];
   primePreview(s);
 }
 
@@ -219,11 +230,12 @@ async function save(): Promise<void> {
   }
   saving.value = true;
   try {
+    const srcs = entries.value.map((e) => e.src);
     if (isCreate.value) {
       await api("POST", "/api/playlists", {
         name: name.value,
         description: description.value,
-        entries: entries.value,
+        entries: srcs,
       });
       ok("Playlist created");
     } else {
@@ -233,7 +245,7 @@ async function save(): Promise<void> {
         {
           name: name.value,
           description: description.value,
-          entries: entries.value,
+          entries: srcs,
         },
       );
       ok("Playlist saved");
@@ -280,21 +292,22 @@ async function save(): Promise<void> {
           ref="listEl"
           class="entry-list"
         >
-          <!-- Key by index, not by source: server enforces uniqueness so
-               duplicates shouldn't ship, but if a future code path lets
-               them in, identical :key values would silently misorder
-               rows after a drag (Vue would recycle the wrong node). -->
+          <!-- Key by uid (per-modal-instance, stable across drags). With
+               an index key Vue patches in place after SortableJS moves
+               DOM nodes — the dragged row ends up at the wrong index.
+               A uid lets Vue's diff line up the new array with the
+               post-drag DOM. -->
           <li
-            v-for="(src, i) in entries"
-            :key="i"
+            v-for="(entry, i) in entries"
+            :key="entry.uid"
             class="entry"
-            :class="{ 'entry--unknown': previews[src]?.kind === 'unknown' }"
+            :class="{ 'entry--unknown': previews[entry.src]?.kind === 'unknown' }"
           >
             <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
-            <Thumb :src="entryCover(src)" />
+            <Thumb :src="entryCover(entry.src)" />
             <div class="entry-info">
-              <div class="entry-label">{{ entryLabel(src) }}</div>
-              <div class="entry-sub">{{ entrySub(src) || src }}</div>
+              <div class="entry-label">{{ entryLabel(entry.src) }}</div>
+              <div class="entry-sub">{{ entrySub(entry.src) || entry.src }}</div>
             </div>
             <AppButton
               variant="ghost"
