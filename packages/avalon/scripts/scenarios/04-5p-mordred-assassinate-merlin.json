@@ -1,0 +1,15 @@
+{
+  "name": "5p mordred via 3 cleans then assassin kills merlin",
+  "positions": ["merlin", "assassin", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 4,
+  "actions": [
+    {"set": {"missionResults": ["success", "success", "success", null, null]}},
+    {"open": "assassinate"},
+    {"click": {"userId": "u1", "componentId": "asn", "tail": "0"}}
+  ],
+  "expect": {
+    "gameRemoved": true,
+    "finalWinner": "mordred"
+  }
+}

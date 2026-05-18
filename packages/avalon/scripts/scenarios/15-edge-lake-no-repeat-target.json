@@ -1,0 +1,20 @@
+{
+  "name": "lake refuses to re-target a previous holder",
+  "positions": ["merlin", "assassin", "percival", "morgana", "mordred", "loyal", "loyal"],
+  "ladyEnabled": true,
+  "leaderIndex": 0,
+  "ladyHolderIndex": 5,
+  "round": 2,
+  "actions": [
+    {"open": "lake"},
+    {"click": {"userId": "u5", "componentId": "lake", "tail": "6"}},
+
+    {"set": {"round": 3}},
+    {"open": "lake"},
+    {"click": {"userId": "u6", "componentId": "lake", "tail": "5"}}
+  ],
+  "expect": {
+    "ladyHolderIndex": 6,
+    "ladyUseCount": 1
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "5p arthur 3-clean + assassin misses merlin",
+  "positions": ["merlin", "assassin", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 1,
+  "actions": [
+    {"open": "appoint"},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "s:3"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "c"}},
+
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "y"}},
+
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u3", "componentId": "priv", "tail": "s"}},
+
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "s:3"}},
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "s:4"}},
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "c"}},
+
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "y"}},
+
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u3", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u4", "componentId": "priv", "tail": "s"}},
+
+    {"click": {"userId": "u2", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u2", "componentId": "appt", "tail": "s:3"}},
+    {"click": {"userId": "u2", "componentId": "appt", "tail": "c"}},
+
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "y"}},
+
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u3", "componentId": "priv", "tail": "s"}},
+
+    {"click": {"userId": "u1", "componentId": "asn", "tail": "3"}}
+  ],
+  "expect": {
+    "gameRemoved": true,
+    "finalWinner": "arthur"
+  }
+}

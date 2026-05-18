@@ -1,0 +1,17 @@
+{
+  "name": "7p mordred via 3 mission failures",
+  "positions": ["merlin", "assassin", "percival", "morgana", "mordred", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 3,
+  "actions": [
+    {"set": {"missionResults": ["fail", "fail", null, null, null]}},
+    {"open": "privateVote", "openArgs": {"missionMembers": [1, 3, 0]}},
+    {"click": {"userId": "u1", "componentId": "priv", "tail": "f"}},
+    {"click": {"userId": "u3", "componentId": "priv", "tail": "f"}},
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}}
+  ],
+  "expect": {
+    "gameRemoved": true,
+    "finalWinner": "mordred"
+  }
+}

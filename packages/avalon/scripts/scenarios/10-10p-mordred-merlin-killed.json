@@ -1,0 +1,18 @@
+{
+  "name": "10p mordred via assassinate hitting merlin",
+  "positions": [
+    "merlin", "assassin", "percival", "morgana", "mordred", "oberon",
+    "loyal", "loyal", "loyal", "loyal"
+  ],
+  "leaderIndex": 0,
+  "round": 4,
+  "actions": [
+    {"set": {"missionResults": ["success", "success", "success", null, null]}},
+    {"open": "assassinate"},
+    {"click": {"userId": "u1", "componentId": "asn", "tail": "0"}}
+  ],
+  "expect": {
+    "gameRemoved": true,
+    "finalWinner": "mordred"
+  }
+}

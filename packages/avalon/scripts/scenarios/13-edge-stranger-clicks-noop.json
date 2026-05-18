@@ -1,0 +1,19 @@
+{
+  "name": "non-player clicks across stages all become no-ops",
+  "positions": ["merlin", "assassin", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 1,
+  "actions": [
+    {"open": "appoint"},
+    {"click": {"userId": "stranger", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "stranger", "componentId": "deal"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "s:1"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "c"}},
+    {"click": {"userId": "stranger", "componentId": "pub", "tail": "y"}}
+  ],
+  "expect": {
+    "currentKind": "publicVote",
+    "consecutiveRejections": 0
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "name": "5p mordred via 5 consecutive proposal rejections",
+  "positions": ["merlin", "assassin", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 1,
+  "actions": [
+    {"open": "appoint"},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "s:1"}},
+    {"click": {"userId": "u0", "componentId": "appt", "tail": "c"}},
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "n"}},
+
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "s:1"}},
+    {"click": {"userId": "u1", "componentId": "appt", "tail": "c"}},
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "n"}},
+
+    {"click": {"userId": "u2", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u2", "componentId": "appt", "tail": "s:1"}},
+    {"click": {"userId": "u2", "componentId": "appt", "tail": "c"}},
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "n"}},
+
+    {"click": {"userId": "u3", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u3", "componentId": "appt", "tail": "s:1"}},
+    {"click": {"userId": "u3", "componentId": "appt", "tail": "c"}},
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "n"}},
+
+    {"click": {"userId": "u4", "componentId": "appt", "tail": "s:0"}},
+    {"click": {"userId": "u4", "componentId": "appt", "tail": "s:1"}},
+    {"click": {"userId": "u4", "componentId": "appt", "tail": "c"}},
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "n"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "n"}}
+  ],
+  "expect": {
+    "gameRemoved": true,
+    "finalWinner": "mordred"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "7p lake-of-the-lady reveals faction; holder's vision picks up the result",
+  "positions": ["merlin", "assassin", "percival", "morgana", "mordred", "loyal", "loyal"],
+  "ladyEnabled": true,
+  "leaderIndex": 0,
+  "ladyHolderIndex": 5,
+  "round": 3,
+  "actions": [
+    {"open": "lake"},
+    {"click": {"userId": "u5", "componentId": "lake", "tail": "1"}}
+  ],
+  "expect": {
+    "ladyHolderIndex": 1,
+    "ladyUseCount": 1,
+    "vision": [
+      {"viewerUserId": "u5", "targetUserId": "u1", "marker": "red"}
+    ]
+  }
+}

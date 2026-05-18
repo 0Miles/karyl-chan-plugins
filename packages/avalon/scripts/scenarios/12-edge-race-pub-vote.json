@@ -1,0 +1,17 @@
+{
+  "name": "race: 5 simultaneous pub:y clicks on the same channel all record cleanly",
+  "positions": ["merlin", "assassin", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 1,
+  "actions": [
+    {"open": "publicVote", "openArgs": {"missionMembers": [0, 1]}},
+    {"click": {"userId": "u0", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u1", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u2", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u3", "componentId": "pub", "tail": "y"}},
+    {"click": {"userId": "u4", "componentId": "pub", "tail": "y"}}
+  ],
+  "expect": {
+    "currentKind": "privateVote"
+  }
+}

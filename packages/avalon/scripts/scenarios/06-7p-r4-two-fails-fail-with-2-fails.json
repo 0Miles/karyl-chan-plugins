@@ -1,0 +1,17 @@
+{
+  "name": "7p r4 mission with 2 fails actually fails",
+  "positions": ["merlin", "assassin", "percival", "morgana", "mordred", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 4,
+  "actions": [
+    {"set": {"missionResults": ["success", "success", "fail", null, null]}},
+    {"open": "privateVote", "openArgs": {"missionMembers": [1, 4, 0, 5]}},
+    {"click": {"userId": "u1", "componentId": "priv", "tail": "f"}},
+    {"click": {"userId": "u4", "componentId": "priv", "tail": "f"}},
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u5", "componentId": "priv", "tail": "s"}}
+  ],
+  "expect": {
+    "missionResults": ["success", "success", "fail", "fail", null]
+  }
+}

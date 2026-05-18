@@ -1,0 +1,15 @@
+{
+  "name": "loyal cannot vote fail at engine boundary; mission still resolves",
+  "positions": ["merlin", "assassin", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 1,
+  "actions": [
+    {"open": "privateVote", "openArgs": {"missionMembers": [0, 3]}},
+    {"click": {"userId": "u3", "componentId": "priv", "tail": "f"}},
+    {"click": {"userId": "u3", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}}
+  ],
+  "expect": {
+    "missionResults": ["success", null, null, null, null]
+  }
+}

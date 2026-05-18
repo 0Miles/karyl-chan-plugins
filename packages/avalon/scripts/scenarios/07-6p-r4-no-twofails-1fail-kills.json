@@ -1,0 +1,16 @@
+{
+  "name": "6p r4 mission with 1 fail fails (no two-fails rule for n<7)",
+  "positions": ["merlin", "assassin", "percival", "morgana", "loyal", "loyal"],
+  "leaderIndex": 0,
+  "round": 4,
+  "actions": [
+    {"set": {"missionResults": ["success", "success", "fail", null, null]}},
+    {"open": "privateVote", "openArgs": {"missionMembers": [1, 0, 4]}},
+    {"click": {"userId": "u1", "componentId": "priv", "tail": "f"}},
+    {"click": {"userId": "u0", "componentId": "priv", "tail": "s"}},
+    {"click": {"userId": "u4", "componentId": "priv", "tail": "s"}}
+  ],
+  "expect": {
+    "missionResults": ["success", "success", "fail", "fail", null]
+  }
+}
