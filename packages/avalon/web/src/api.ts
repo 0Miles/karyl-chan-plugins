@@ -132,6 +132,48 @@ async function refreshOnce(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Multipart upload helper for role artwork. Same auth + transparent
+ * refresh as `api()`, just sends the body as FormData with a single
+ * `file` part — what the Fastify multipart route on the plugin
+ * expects.
+ */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!_manage) {
+      _onDenied?.("Session expired. Re-run /avalon manage.");
+      throw new Error("not authenticated");
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(API_BASE + path, {
+      method: "POST",
+      headers: { authorization: `Bearer ${_manage.accessToken}` },
+      body: fd,
+    });
+    if (res.status === 401 && attempt === 0) {
+      const ok = await refreshOnce();
+      if (!ok) {
+        _onDenied?.("Session expired. Re-run /avalon manage.");
+        throw new Error("session expired");
+      }
+      continue;
+    }
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json();
+        if (errBody?.error) msg = String(errBody.error);
+      } catch {
+        // keep status
+      }
+      throw new Error(msg);
+    }
+    return res.json() as Promise<T>;
+  }
+  throw new Error("unreachable");
+}
+
 export async function api<T>(
   method: string,
   path: string,

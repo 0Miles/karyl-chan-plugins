@@ -25,6 +25,13 @@ export type BotRpc = (
 interface Runtime {
   botRpc: BotRpc;
   log: Logger;
+  /**
+   * Browser-reachable base URL for this plugin's HTTP surface
+   * (e.g. `https://bot.example.com/plugin/karyl-avalon`). Discord
+   * embed thumbnails / images use this — the bot needs a public URL
+   * it can fetch from, not the internal http://karyl-avalon-plugin:3000.
+   */
+  publicBaseUrl(): string;
 }
 
 let active: Runtime | null = null;

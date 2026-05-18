@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   api,
+  apiUpload,
   decodeJwt,
   exchangeManageJwt,
   loadStoredManage,
@@ -9,15 +10,39 @@ import {
   readTokenFromUrl,
   setManageTokens,
 } from "./api";
-import type { GamesResponse, GameSnapshot, SignupSnapshot } from "./types";
+import type {
+  ArtResponse,
+  GamesResponse,
+  GameSnapshot,
+  RoleArtEntry,
+  RolePosition,
+  SignupSnapshot,
+} from "./types";
 
 type View = "loading" | "denied" | "manage";
 const view = ref<View>("loading");
 const deniedMessage = ref<string | null>(null);
 const games = ref<GameSnapshot[]>([]);
 const signups = ref<SignupSnapshot[]>([]);
+const art = ref<RoleArtEntry[]>([]);
 const lastError = ref<string | null>(null);
 let pollTimer: number | undefined;
+
+const ROLE_LIST: { position: RolePosition; label: string; faction: "arthur" | "mordred" }[] = [
+  { position: "merlin", label: "梅林", faction: "arthur" },
+  { position: "percival", label: "派西維爾", faction: "arthur" },
+  { position: "loyal", label: "亞瑟的忠臣", faction: "arthur" },
+  { position: "assassin", label: "刺客", faction: "mordred" },
+  { position: "morgana", label: "莫甘娜", faction: "mordred" },
+  { position: "mordred", label: "莫德雷德", faction: "mordred" },
+  { position: "oberon", label: "奧伯倫", faction: "mordred" },
+];
+
+const artByPosition = computed<Record<string, RoleArtEntry | undefined>>(() => {
+  const m: Record<string, RoleArtEntry | undefined> = {};
+  for (const e of art.value) m[e.position] = e;
+  return m;
+});
 
 onAccessDenied((msg) => {
   deniedMessage.value = msg || "Access denied — re-run /avalon manage.";
@@ -72,13 +97,53 @@ async function bootstrap(): Promise<void> {
 
 async function refresh(): Promise<void> {
   try {
-    const r = await api<GamesResponse>("GET", "/api/manage/games");
+    const [r, a] = await Promise.all([
+      api<GamesResponse>("GET", "/api/manage/games"),
+      api<ArtResponse>("GET", "/api/manage/art"),
+    ]);
     games.value = r.games || [];
     signups.value = r.signups || [];
+    art.value = a.art || [];
     lastError.value = null;
   } catch (e: unknown) {
     lastError.value = e instanceof Error ? e.message : String(e);
   }
+}
+
+async function uploadArt(position: RolePosition, file: File): Promise<void> {
+  try {
+    await apiUpload(`/api/manage/art/${position}`, file);
+    await refresh();
+  } catch (e: unknown) {
+    lastError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function deleteArt(position: RolePosition): Promise<void> {
+  if (!window.confirm(`刪除「${labelOf(position)}」的圖像？`)) return;
+  try {
+    await api("DELETE", `/api/manage/art/${position}`);
+    await refresh();
+  } catch (e: unknown) {
+    lastError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function labelOf(position: RolePosition): string {
+  return ROLE_LIST.find((r) => r.position === position)?.label ?? position;
+}
+
+function onArtFileChange(position: RolePosition, e: Event): void {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ""; // reset so the same file can be re-picked
+  if (file) void uploadArt(position, file);
+}
+
+function fmtKb(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function startPolling(): void {
@@ -196,6 +261,59 @@ onBeforeUnmount(() => {
             </tr>
           </tbody>
         </table>
+      </section>
+
+      <section>
+        <h2>
+          角色圖像
+          <span class="count">
+            ({{ art.length }} / {{ ROLE_LIST.length }})
+          </span>
+        </h2>
+        <p class="hint">
+          每張圖最大 5 MB，支援 JPEG / PNG / WebP / GIF。上傳後會做為發牌階段
+          身份卡的縮圖。
+        </p>
+        <div class="art-grid">
+          <div
+            v-for="r in ROLE_LIST"
+            :key="r.position"
+            class="art-tile"
+            :class="r.faction"
+          >
+            <div class="art-thumb">
+              <img
+                v-if="artByPosition[r.position]"
+                :src="artByPosition[r.position]!.url"
+                :alt="r.label"
+              />
+              <div v-else class="empty-thumb">未上傳</div>
+            </div>
+            <div class="art-meta">
+              <div class="art-label">{{ r.label }}</div>
+              <div v-if="artByPosition[r.position]" class="art-size">
+                {{ fmtKb(artByPosition[r.position]!.size) }}
+              </div>
+            </div>
+            <div class="art-actions">
+              <label class="upload-btn">
+                {{ artByPosition[r.position] ? "更換" : "上傳" }}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  @change="onArtFileChange(r.position, $event)"
+                />
+              </label>
+              <button
+                v-if="artByPosition[r.position]"
+                class="danger small"
+                @click="deleteArt(r.position)"
+              >
+                刪除
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <p v-if="lastError" class="err">{{ lastError }}</p>
@@ -324,5 +442,87 @@ button.danger:hover {
   color: var(--danger);
   font-size: 0.9rem;
   margin-top: 1rem;
+}
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+.art-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+.art-tile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.art-tile.arthur {
+  border-top: 3px solid #458588;
+}
+.art-tile.mordred {
+  border-top: 3px solid var(--danger);
+}
+.art-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.art-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.empty-thumb {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.art-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.art-label {
+  font-weight: 600;
+}
+.art-size {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.art-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.upload-btn {
+  flex: 1;
+  text-align: center;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.upload-btn:hover {
+  background: var(--border);
+}
+.upload-btn input {
+  display: none;
+}
+button.small {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8rem;
 }
 </style>

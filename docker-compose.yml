@@ -61,10 +61,14 @@ services:
     environment:
       PLUGIN_URL: http://karyl-avalon-plugin:3000
       KARYL_PLUGIN_SETUP_SECRET: ${KARYL_PLUGIN_SETUP_SECRET_AVALON:-}
+      AVALON_ART_DIR: /app/data/art
+    volumes:
+      - avalon-art:/app/data/art
 
 volumes:
   radio-music:   # downloaded audio files
   radio-covers:  # uploaded cover images
+  avalon-art:    # admin-uploaded role artwork
 
 networks:
   karyl-chan-net:

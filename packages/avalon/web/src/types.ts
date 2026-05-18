@@ -24,3 +24,23 @@ export interface GamesResponse {
   games: GameSnapshot[];
   signups: SignupSnapshot[];
 }
+
+export type RolePosition =
+  | "merlin"
+  | "percival"
+  | "assassin"
+  | "morgana"
+  | "mordred"
+  | "oberon"
+  | "loyal";
+
+export interface RoleArtEntry {
+  position: RolePosition;
+  filename: string;
+  size: number;
+  url: string;
+}
+
+export interface ArtResponse {
+  art: RoleArtEntry[];
+}

@@ -15,6 +15,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@fastify/multipart": "^9.0.3",
     "@karyl-chan/plugin-sdk": "workspace:*"
   },
   "devDependencies": {

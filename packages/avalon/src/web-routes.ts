@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import fastifyMultipart from "@fastify/multipart";
 import { createReadStream, readFileSync } from "fs";
 import { stat } from "fs/promises";
 import { dirname, join } from "path";
@@ -16,6 +17,16 @@ import {
 import { PLUGIN_KEY } from "./constants.js";
 import { listGames, removeGame } from "./game/store.js";
 import { listSignups, removeSignup } from "./flow/signup.js";
+import {
+  artFilePath,
+  extForMime,
+  isSafeArtFilename,
+  isValidPosition,
+  listArt,
+  mimeForArtFile,
+  removeArt,
+  saveArt,
+} from "./art.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const WEBUI_CAP = "webui.access";
@@ -174,10 +185,16 @@ function snapshotSignups(): SignupSnapshot[] {
 
 // ── Route registration ────────────────────────────────────────────────
 
+const MAX_ART_BYTES = 5 * 1024 * 1024;
+
 export async function registerWebRoutes(
   server: FastifyInstance,
   getEffectiveBase: () => string,
 ): Promise<void> {
+  await server.register(fastifyMultipart, {
+    limits: { fileSize: MAX_ART_BYTES, files: 1, fields: 2 },
+  });
+
   // ── manage session bootstrap + refresh ────────────────────────────
   server.post("/api/manage/exchange", async (request, reply) => {
     const claims = authManageBootstrap(request, reply);
@@ -245,6 +262,102 @@ export async function registerWebRoutes(
         return reply.code(404).send({ error: "No game or sign-up here" });
       }
       return { ok: true, channelId };
+    },
+  );
+
+  // ── Role artwork: list / upload / delete (admin-gated) ───────────
+  // Each entry's `url` is fully-qualified (uses effectiveBase + a
+  // content hash for cache-busting) so the WebUI can preview it
+  // directly and Discord can fetch it for the role-reveal embed.
+  server.get("/api/manage/art", async (request, reply) => {
+    if (!authManageAccess(request, reply)) return;
+    const entries = await listArt();
+    return {
+      art: entries.map((e) => ({
+        position: e.position,
+        filename: e.filename,
+        size: e.size,
+        url: `${getEffectiveBase()}/art/${e.filename}?v=${Math.floor(e.mtimeMs)}`,
+      })),
+    };
+  });
+
+  server.post<{ Params: { position: string } }>(
+    "/api/manage/art/:position",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const position = request.params.position;
+      if (!isValidPosition(position)) {
+        return reply.code(400).send({ error: "Unknown role" });
+      }
+      let file;
+      try {
+        file = await request.file();
+      } catch {
+        return reply.code(400).send({ error: "Expected a multipart upload" });
+      }
+      if (!file) return reply.code(400).send({ error: "No file uploaded" });
+      const ext = extForMime(file.mimetype || "");
+      if (!ext) {
+        return reply
+          .code(415)
+          .send({ error: "Unsupported image type (use jpeg/png/webp/gif)" });
+      }
+      let buf: Buffer;
+      try {
+        buf = await file.toBuffer();
+      } catch {
+        return reply
+          .code(413)
+          .send({ error: `Image too large (max ${MAX_ART_BYTES >> 20} MB)` });
+      }
+      if (buf.length === 0) {
+        return reply.code(400).send({ error: "Empty file" });
+      }
+      const filename = await saveArt(position, buf, ext);
+      return {
+        position,
+        filename,
+        url: `${getEffectiveBase()}/art/${filename}?v=${Date.now()}`,
+      };
+    },
+  );
+
+  server.delete<{ Params: { position: string } }>(
+    "/api/manage/art/:position",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const position = request.params.position;
+      if (!isValidPosition(position)) {
+        return reply.code(400).send({ error: "Unknown role" });
+      }
+      const removed = await removeArt(position);
+      if (!removed) return reply.code(404).send({ error: "No artwork stored" });
+      return { ok: true };
+    },
+  );
+
+  // Public serve — no auth. Discord fetches the URL anonymously when
+  // rendering the role-reveal embed's thumbnail, and the WebUI fetches
+  // it for previews. Strict <position>.<ext> filename only.
+  server.get<{ Params: { filename: string } }>(
+    "/art/:filename",
+    async (request, reply) => {
+      const filename = request.params.filename;
+      if (!isSafeArtFilename(filename)) {
+        return reply.code(400).send({ error: "Invalid filename" });
+      }
+      const filepath = artFilePath(filename);
+      try {
+        const st = await stat(filepath);
+        reply.header("Content-Type", mimeForArtFile(filename));
+        reply.header("Content-Length", st.size);
+        reply.header("Cache-Control", "public, max-age=86400");
+        reply.header("X-Content-Type-Options", "nosniff");
+        return reply.send(createReadStream(filepath));
+      } catch {
+        return reply.code(404).send({ error: "File not found" });
+      }
     },
   );
 

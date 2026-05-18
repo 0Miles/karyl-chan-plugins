@@ -11,6 +11,8 @@ import { getGame } from "../game/store.js";
 import { followupEphemeral, sendMessage } from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
 import { openAppoint } from "./stages-appoint.js";
+import { findArt } from "../art.js";
+import { runtime } from "./runtime.js";
 
 /**
  * Per-channel deal-reveal board. Posted once right after `deal()`
@@ -48,8 +50,21 @@ export async function sendDealBoard(state: GameState): Promise<void> {
   await openAppoint(state);
 }
 
-/** Ephemeral reveal for whoever clicked the [查看身份] button. */
-export function renderDealReveal(state: GameState, viewerUserId: string) {
+/**
+ * Ephemeral reveal for whoever clicked the [查看身份] button. Awaits
+ * the admin-uploaded role art (if any) so the embed can carry a
+ * thumbnail Discord will render alongside the flavour line.
+ */
+export async function renderDealReveal(
+  state: GameState,
+  viewerUserId: string,
+): Promise<{
+  color: number;
+  title: string;
+  description: string;
+  fields: Array<{ name: string; value: string; inline?: boolean }>;
+  thumbnail?: { url: string };
+} | null> {
   const viewer = playerByUserId(state, viewerUserId);
   if (!viewer) return null;
   const vision = buildVision(state, viewer);
@@ -65,6 +80,13 @@ export function renderDealReveal(state: GameState, viewerUserId: string) {
   // share a generic line. The flavour text repeats the role name so
   // we drop the older `stage.deal.yourRole` line for it.
   const flavorKey = `role.flavor.${viewer.position}` as const;
+  // Look up admin-uploaded art for this position. The URL embeds the
+  // mtime-derived etag so a re-upload busts Discord's CDN cache.
+  const art = await findArt(viewer.position).catch(() => null);
+  const thumbnail =
+    art != null
+      ? { url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}` }
+      : undefined;
   return {
     color: EMBED_COLOR,
     title: t(undefined, "stage.deal.title"),
@@ -76,6 +98,7 @@ export function renderDealReveal(state: GameState, viewerUserId: string) {
         inline: false,
       },
     ],
+    ...(thumbnail ? { thumbnail } : {}),
   };
 }
 
@@ -90,7 +113,7 @@ export async function handleDealClick(
     });
     return null;
   }
-  const reveal = renderDealReveal(game, ctx.userId);
+  const reveal = await renderDealReveal(game, ctx.userId);
   if (!reveal) {
     await followupEphemeral({
       interactionToken: ctx.interactionToken,

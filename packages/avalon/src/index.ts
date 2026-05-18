@@ -1,6 +1,7 @@
 import { buildPlugin } from "./plugin.js";
 import { wireRuntime } from "./flow/dispatcher.js";
 import {
+  effectiveBase,
   setAvalonPublicBaseUrl,
   setAvalonSessionVerifyKey,
 } from "./web-routes.js";
@@ -16,6 +17,7 @@ wireRuntime({
     warn: (msg, meta) => started.server.log.warn(meta ?? {}, msg),
     error: (msg, meta) => started.server.log.error(meta ?? {}, msg),
   },
+  publicBaseUrl: effectiveBase,
 });
 // Web-routes' auth needs the bot's Ed25519 public key + the
 // publicBaseUrl, both of which only exist after start() resolves —

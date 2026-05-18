@@ -20,6 +20,9 @@ importers:
 
   packages/avalon:
     dependencies:
+      '@fastify/multipart':
+        specifier: ^9.0.3
+        version: 9.4.0
       '@karyl-chan/plugin-sdk':
         specifier: workspace:*
         version: link:../sdk
