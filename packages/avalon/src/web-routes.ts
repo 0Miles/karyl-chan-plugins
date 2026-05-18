@@ -409,8 +409,18 @@ export async function registerWebRoutes(
     // so this is the effective CSP that lands at the browser.
     reply.header(
       "Content-Security-Policy",
-      "default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'; " +
-        "script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+      // `blob:` is required by the cropperjs preview pipeline. The
+      // chosen role-art file becomes an objectURL (`blob:…`) used in
+      // two places:
+      //  - img-src: the <img> in the modal renders the blob before
+      //    the cropper canvas takes over.
+      //  - connect-src: cropperjs `checkOrientation: true` does a
+      //    `fetch(blobURL)` to sniff the image's EXIF orientation.
+      // The art tile previews of already-uploaded files load from
+      // the same-origin `/art/<file>` (covered by `'self'`). `https:`
+      // stays so a future role-art CDN URL would still display.
+      "default-src 'none'; img-src 'self' https: data: blob:; style-src 'unsafe-inline'; " +
+        "script-src 'unsafe-inline'; connect-src 'self' blob:; base-uri 'none'; form-action 'none'",
     );
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
