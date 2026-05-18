@@ -43,6 +43,39 @@ const lastListenerAt = new Map<string, number>();
 // would run concurrently and double-play / clobber `current`.
 const inFlight = new Set<string>();
 
+/**
+ * Exponential backoff for `voice.status` RPC failures, per guild.
+ * Without it, a 30 s bot restart with 20 active guilds floods 20 req/s
+ * of failing RPCs into the bot for the whole window. Cleared on the
+ * first successful response.
+ */
+const rpcBackoff = new Map<
+  string,
+  { failures: number; nextAttemptAt: number }
+>();
+/** First retry waits 1 s; doubles per failure; caps at 30 s. */
+const RPC_BACKOFF_BASE_MS = 1_000;
+const RPC_BACKOFF_MAX_MS = 30_000;
+function recordRpcFailure(guildId: string): void {
+  const cur = rpcBackoff.get(guildId);
+  const failures = (cur?.failures ?? 0) + 1;
+  const delay = Math.min(
+    RPC_BACKOFF_BASE_MS * 2 ** (failures - 1),
+    RPC_BACKOFF_MAX_MS,
+  );
+  rpcBackoff.set(guildId, {
+    failures,
+    nextAttemptAt: Date.now() + delay,
+  });
+}
+function clearRpcBackoff(guildId: string): void {
+  rpcBackoff.delete(guildId);
+}
+function isBackoffActive(guildId: string): boolean {
+  const cur = rpcBackoff.get(guildId);
+  return cur !== undefined && cur.nextAttemptAt > Date.now();
+}
+
 // Pre-resolved next-up track per guild: while the current track plays we
 // kick off the (slow) yt-dlp resolve for `queue[0]` so it's ready the
 // moment the current one ends. Keyed by guild → { the lazy entry's url,
@@ -190,7 +223,14 @@ async function probePhase(
     const status = (await botRpc("/api/plugin/voice.status", {
       guild_id: guildId,
     })) as VoiceStatus | null;
-    if (!status) return null; // RPC blip — retry next tick.
+    if (!status) {
+      // RPC blip — record the failure and start / extend the
+      // exponential backoff so a multi-second bot outage doesn't see
+      // every active guild spam-retrying every 1 s.
+      recordRpcFailure(guildId);
+      return null;
+    }
+    clearRpcBackoff(guildId);
     if (!status.connected) {
       seenGuilds.delete(guildId);
       prefetched.delete(guildId);
@@ -305,6 +345,10 @@ async function processGuild(
   seenGuilds: Set<string>,
 ): Promise<void> {
   if (inFlight.has(guildId)) return;
+  // Honour the per-guild RPC backoff so a bot outage doesn't have
+  // every active guild firing voice.status every 1 s for the whole
+  // window. The probe phase below clears the backoff on success.
+  if (isBackoffActive(guildId)) return;
   inFlight.add(guildId);
   try {
     // Two-phase tick under the same `inFlight` guard:
