@@ -94,41 +94,45 @@ function autoplaySeedVideoId(s: GuildState): string | null {
 }
 
 /**
- * Autoplay refill: fire-on-last. When `autoplay` is on, loop is "off",
- * and the cursor is on the last track in the playlist (i.e. there is
- * nothing upcoming after it), fetch a YouTube "mix" seeded from the
- * current (or most-recent YouTube) track and append the recommendations.
+ * Decide whether the guild wants an autoplay refill right now, and if
+ * so claim the seed under the lock so a concurrent tick can't fire
+ * the same fetch. Caller runs this inside `withGuildLock`; the yt-dlp
+ * mix call happens OUTSIDE the lock (Phase 2); then
+ * `applyAutoplayRecs` re-enters the lock to enqueue (Phase 3).
  *
- * Triggered from the advance loop's tick whenever the conditions are met
- * — but `autoplaySeededFrom` records the last seed so a still-running
- * fetch or a seed that yields nothing fresh doesn't re-fire until a
- * *different* track becomes the seed. Errors are swallowed so a yt-dlp
- * hiccup doesn't break the advance loop.
+ * Splitting the fetch out of the lock keeps a 10 s mix resolve from
+ * blocking every slash command / WebUI op on this guild for that
+ * whole window — used to all be one critical section.
  */
-async function maybeAutoplayRefill(
-  guildId: string,
-  log: Logger,
-): Promise<void> {
+function planAutoplayRefill(guildId: string): string | null {
   const s = getState(guildId);
-  if (!s || !s.autoplay || s.loop !== "off") return;
-  // Fire only on the last track — autoplay is "what should play AFTER
-  // this one when there's nothing queued", not "always top up".
-  if (getUpcoming(s).length > 0) return;
+  if (!s || !s.autoplay || s.loop !== "off") return null;
+  if (getUpcoming(s).length > 0) return null;
   const seedId = autoplaySeedVideoId(s);
-  if (!seedId || seedId === s.autoplaySeededFrom) return;
+  if (!seedId || seedId === s.autoplaySeededFrom) return null;
+  // Claim the seed under the lock — debounces concurrent ticks for
+  // the duration of the (unlocked) yt-dlp call.
   s.autoplaySeededFrom = seedId;
+  return seedId;
+}
 
-  let recs: Track[];
-  try {
-    recs = await resolveAutoplayRecommendations(seedId);
-  } catch (err) {
-    log.warn("autoplay: mix fetch failed", {
-      guildId,
-      seedId,
-      err: String(err),
-    });
-    return;
-  }
+/**
+ * Enqueue autoplay recommendations under the lock. Re-validates that
+ * the session still wants this seed's recs — autoplay may have been
+ * toggled off, the user may have queued tracks manually, or loop mode
+ * may have changed while we were fetching.
+ */
+function applyAutoplayRecs(
+  guildId: string,
+  seedId: string,
+  recs: Track[],
+  log: Logger,
+): void {
+  const s = getState(guildId);
+  if (!s) return;
+  if (!s.autoplay || s.loop !== "off") return;
+  if (s.autoplaySeededFrom !== seedId) return;
+  if (getUpcoming(s).length > 0) return;
 
   // Skip the seed itself and anything already in the playlist this
   // session — and don't repeat a video within the same batch.
@@ -157,6 +161,143 @@ async function maybeAutoplayRefill(
   log.info("autoplay: queued recommendations", { guildId, seedId, count: queued });
 }
 
+type VoiceStatus = {
+  connected?: boolean;
+  playing?: boolean;
+  channelId?: string | null;
+  paused?: boolean;
+  listeners?: number;
+};
+
+/**
+ * Phase 1 (under lock): early-exit checks + claim an autoplay seed
+ * if eligible. Returns `{ status, seedId }` for Phase 2; null tells
+ * the caller to terminate this tick.
+ */
+async function probePhase(
+  guildId: string,
+  botRpc: BotRpc,
+  log: Logger,
+  seenGuilds: Set<string>,
+): Promise<{ status: VoiceStatus; seedId: string | null } | null> {
+  return withGuildLock(guildId, async () => {
+    if (isIdle(guildId)) {
+      seenGuilds.delete(guildId);
+      prefetched.delete(guildId);
+      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+      return null;
+    }
+    const status = (await botRpc("/api/plugin/voice.status", {
+      guild_id: guildId,
+    })) as VoiceStatus | null;
+    if (!status) return null; // RPC blip — retry next tick.
+    if (!status.connected) {
+      seenGuilds.delete(guildId);
+      prefetched.delete(guildId);
+      lastListenerAt.delete(guildId);
+      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+      return null;
+    }
+    // Auto-end the session once the bot's voice channel has been
+    // empty of human listeners for EMPTY_CHANNEL_STOP_MS.
+    const now = Date.now();
+    if (status.listeners === 0) {
+      const since = lastListenerAt.get(guildId);
+      if (since !== undefined && now - since > EMPTY_CHANNEL_STOP_MS) {
+        log.info(
+          "advance: voice channel empty for >1min — stopping session",
+          { guildId },
+        );
+        seenGuilds.delete(guildId);
+        prefetched.delete(guildId);
+        lastListenerAt.delete(guildId);
+        await doStop(guildId, botRpc).catch(() => {});
+        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+        return null;
+      }
+      if (since === undefined) lastListenerAt.set(guildId, now);
+    } else {
+      lastListenerAt.set(guildId, now);
+    }
+    const seedId = planAutoplayRefill(guildId);
+    return { status, seedId };
+  });
+}
+
+/**
+ * Phase 3 (under lock): apply any autoplay recs fetched outside the
+ * lock, then run the normal advance work.
+ */
+async function advancePhase(
+  guildId: string,
+  botRpc: BotRpc,
+  log: Logger,
+  seenGuilds: Set<string>,
+  status: VoiceStatus,
+  refill: { seedId: string; recs: Track[] } | null,
+): Promise<void> {
+  return withGuildLock(guildId, async () => {
+    if (refill) applyAutoplayRecs(guildId, refill.seedId, refill.recs, log);
+    if (!status.playing) {
+      const candidate = peekNext(guildId);
+      if (candidate) {
+        // If we pre-resolved this exact entry while the last track
+        // was playing, use that — no fresh yt-dlp call between songs.
+        const pf = prefetched.get(guildId);
+        prefetched.delete(guildId);
+        const hint =
+          candidate.track.needsResolve && pf && pf.url === candidate.track.url
+            ? { resolved: await pf.promise }
+            : undefined;
+        const outcome = await playTrack(
+          candidate.track,
+          (url) =>
+            botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
+          hint,
+        );
+        if (outcome.ok) {
+          commitCursor(guildId, candidate.idx);
+        } else if (outcome.reason === "play-failed") {
+          // Transient — leave the cursor where it was so the next
+          // tick re-attempts the same lazy entry with a fresh resolve.
+          log.warn("advance: voice.play failed, leaving cursor for retry", {
+            guildId,
+            url: candidate.track.url,
+          });
+        } else {
+          // Deleted / private / region-blocked entry — drop it from
+          // the playlist entirely; next tick picks whatever now sits
+          // at cursor+1.
+          removeTrackAt(guildId, candidate.idx);
+          log.warn("advance: dropping unplayable track", {
+            guildId,
+            url: candidate.track.url,
+          });
+        }
+      } else {
+        // Nothing to advance to and autoplay didn't refill — mark
+        // done so isIdle below tears the session down.
+        endSession(guildId);
+      }
+    }
+    // The advance above may have drained the queue — if so, the
+    // session is done: tear down rather than flashing a "nothing
+    // playing" card.
+    if (isIdle(guildId)) {
+      seenGuilds.delete(guildId);
+      prefetched.delete(guildId);
+      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+      return;
+    }
+    // Pre-resolve the (new) next-up track so the next hand-off is
+    // gapless.
+    ensurePrefetch(guildId);
+    // Keep the public now-playing message current (cheap — hash-
+    // gated; reuses the voice status we already fetched).
+    await nowPlaying.sync(guildId, botRpc, { status }).catch(() => {});
+  });
+}
+
 async function processGuild(
   guildId: string,
   botRpc: BotRpc,
@@ -166,126 +307,37 @@ async function processGuild(
   if (inFlight.has(guildId)) return;
   inFlight.add(guildId);
   try {
-    // Serialize against `/radio` commands, the now-playing buttons and the
-    // WebUI session routes — they all mutate this guild's queue/current
-    // state across awaits, so a tick that interleaved with one of them
-    // could leave the queue inconsistent (see guild-lock.ts). `inFlight`
-    // above still makes a tick that arrives while this one is in progress
-    // (including while it's *waiting* for the lock) skip rather than queue.
-    await withGuildLock(guildId, async () => {
-      // Idle / no state — the session is over (kept GuildState survives a
-      // dry queue for the WebUI play-log, but the public now-playing
-      // message goes away and we stop ticking).
-      if (isIdle(guildId)) {
-        seenGuilds.delete(guildId);
-        prefetched.delete(guildId);
-        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-        return;
+    // Two-phase tick under the same `inFlight` guard:
+    //
+    //   Phase 1 (lock) — voice.status, listener tracking, claim an
+    //   autoplay seed if eligible.
+    //   Phase 2 (no lock) — yt-dlp resolve autoplay recommendations.
+    //     Other slash commands / WebUI ops on this guild can run
+    //     during this window. The seed claim from Phase 1 prevents
+    //     concurrent refills.
+    //   Phase 3 (lock) — apply recs (re-validated for stale state),
+    //   then the normal peek/play/commit/prefetch.
+    //
+    // Splitting the autoplay yt-dlp out of the lock prevents a 10 s
+    // mix fetch from blocking every other op on the guild.
+    const probe = await probePhase(guildId, botRpc, log, seenGuilds);
+    if (!probe) return;
+    let recs: Track[] | null = null;
+    if (probe.seedId) {
+      try {
+        recs = await resolveAutoplayRecommendations(probe.seedId);
+      } catch (err) {
+        log.warn("autoplay: mix fetch failed", {
+          guildId,
+          seedId: probe.seedId,
+          err: String(err),
+        });
+        recs = null;
       }
-      const status = (await botRpc("/api/plugin/voice.status", {
-        guild_id: guildId,
-      })) as {
-        connected?: boolean;
-        playing?: boolean;
-        channelId?: string | null;
-        paused?: boolean;
-        listeners?: number;
-      } | null;
-      if (!status) return; // RPC blip — retry next tick (state unknown; leave the message alone).
-      if (!status.connected) {
-        // Bot is no longer in the channel and this loop has no way to
-        // re-join (that needs a user to follow). Stop ticking, drop the
-        // now-playing message — keep the queue state so a fresh `/radio
-        // play` resumes into it.
-        seenGuilds.delete(guildId);
-        prefetched.delete(guildId);
-        lastListenerAt.delete(guildId);
-        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-        return;
-      }
-      // Auto-end the session once the bot's voice channel has been empty
-      // of human listeners for EMPTY_CHANNEL_STOP_MS. `listeners`
-      // undefined = "can't tell" → treat as occupied (reset the clock).
-      const now = Date.now();
-      if (status.listeners === 0) {
-        const since = lastListenerAt.get(guildId);
-        if (since !== undefined && now - since > EMPTY_CHANNEL_STOP_MS) {
-          log.info(
-            "advance: voice channel empty for >1min — stopping session",
-            { guildId },
-          );
-          seenGuilds.delete(guildId);
-          prefetched.delete(guildId);
-          lastListenerAt.delete(guildId);
-          await doStop(guildId, botRpc).catch(() => {});
-          await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-          return;
-        }
-        if (since === undefined) lastListenerAt.set(guildId, now);
-      } else {
-        lastListenerAt.set(guildId, now);
-      }
-      // Autoplay: fire-on-last. If the current track has nothing after
-      // it AND loop=off AND autoplay is on, append fresh recommendations
-      // before the advance below runs. (The check is cheap when nothing
-      // qualifies — autoplaySeededFrom de-bounces real fetches.)
-      await maybeAutoplayRefill(guildId, log);
-      if (!status.playing) {
-        const candidate = peekNext(guildId);
-        if (candidate) {
-          // If we pre-resolved this exact entry while the last track was
-          // playing, use that — no fresh yt-dlp call between songs.
-          const pf = prefetched.get(guildId);
-          prefetched.delete(guildId);
-          const hint =
-            candidate.track.needsResolve && pf && pf.url === candidate.track.url
-              ? { resolved: await pf.promise }
-              : undefined;
-          const outcome = await playTrack(
-            candidate.track,
-            (url) =>
-              botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
-            hint,
-          );
-          if (outcome.ok) {
-            commitCursor(guildId, candidate.idx);
-          } else if (outcome.reason === "play-failed") {
-            // Transient — leave the cursor where it was so the next
-            // tick re-attempts the same lazy entry with a fresh resolve.
-            log.warn("advance: voice.play failed, leaving cursor for retry", {
-              guildId,
-              url: candidate.track.url,
-            });
-          } else {
-            // Deleted / private / region-blocked entry — drop it from the
-            // playlist entirely; next tick picks whatever now sits at
-            // cursor+1.
-            removeTrackAt(guildId, candidate.idx);
-            log.warn("advance: dropping unplayable track", {
-              guildId,
-              url: candidate.track.url,
-            });
-          }
-        } else {
-          // Nothing to advance to and autoplay didn't refill — mark
-          // done so isIdle below tears the session down.
-          endSession(guildId);
-        }
-      }
-      // The advance above may have drained the queue — if so, the session
-      // is done: tear down rather than flashing a "nothing playing" card.
-      if (isIdle(guildId)) {
-        seenGuilds.delete(guildId);
-        prefetched.delete(guildId);
-        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
-        return;
-      }
-      // Pre-resolve the (new) next-up track so the next hand-off is gapless.
-      ensurePrefetch(guildId);
-      // Keep the public now-playing message current (cheap — hash-gated;
-      // reuses the voice status we already fetched).
-      await nowPlaying.sync(guildId, botRpc, { status }).catch(() => {});
-    });
+    }
+    const refill =
+      probe.seedId && recs ? { seedId: probe.seedId, recs } : null;
+    await advancePhase(guildId, botRpc, log, seenGuilds, probe.status, refill);
   } finally {
     inFlight.delete(guildId);
   }
