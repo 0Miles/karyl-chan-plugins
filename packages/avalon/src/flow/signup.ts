@@ -37,6 +37,16 @@ interface Signup {
 
 const signups = new Map<string, Signup>();
 
+/**
+ * Minimum / maximum players. Bumped from 4→5 (B-001): n=4 is not a
+ * supported Avalon table in the official rulebook and the role-deck
+ * builder rejects it anyway. The mission-size table still has a row
+ * for n=4 for historical clarity but is unreachable through the
+ * signup flow.
+ */
+const MIN_PLAYERS = 5;
+const MAX_PLAYERS = 10;
+
 export type SignupAction = "join" | "leave" | "start" | "cancel";
 
 /**
@@ -134,7 +144,7 @@ async function handleJoinClick(
     });
     return null;
   }
-  if (signup.players.size >= 10) {
+  if (signup.players.size >= MAX_PLAYERS) {
     await followupEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.tooMany"),
@@ -183,7 +193,7 @@ async function handleStartClick(
     });
     return null;
   }
-  if (signup.players.size < 4) {
+  if (signup.players.size < MIN_PLAYERS) {
     await followupEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.notEnough"),
@@ -320,7 +330,9 @@ async function refreshSignupMessage(channelId: string): Promise<void> {
     messageId: signup.messageId,
     embeds: [renderSignupEmbed(hostMention, names)],
     components: signupComponents({
-      canStart: signup.players.size >= 4 && signup.players.size <= 10,
+      canStart:
+        signup.players.size >= MIN_PLAYERS &&
+        signup.players.size <= MAX_PLAYERS,
     }),
   });
 }

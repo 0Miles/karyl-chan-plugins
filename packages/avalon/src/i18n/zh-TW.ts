@@ -24,7 +24,7 @@ export const zhTW = {
 
   "stage.signup.title": "開始新遊戲",
   "stage.signup.content":
-    "按 **加入** 報名遊戲。\n參加者到齊後，由發起人 {host} 按下 **開始**。\n至少需 4 人才能開始。",
+    "按 **加入** 報名遊戲。\n參加者到齊後，由發起人 {host} 按下 **開始**。\n至少需 5 人才能開始。",
   "stage.signup.join": "加入",
   "stage.signup.leave": "離開",
   "stage.signup.start": "開始",
@@ -36,7 +36,7 @@ export const zhTW = {
   "stage.signup.notInList": "你不在名單中。",
   "stage.signup.left": "已離開。",
   "stage.signup.onlyHost": "只有發起人可以開始 / 取消。",
-  "stage.signup.notEnough": "需要至少 4 人才能開始。",
+  "stage.signup.notEnough": "需要至少 5 人才能開始。",
   "stage.signup.tooMany": "最多 10 人。",
   "stage.signup.cancelled": "已取消這場對局。",
 
