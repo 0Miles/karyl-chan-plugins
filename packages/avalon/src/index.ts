@@ -1,5 +1,9 @@
 import { buildPlugin } from "./plugin.js";
 import { wireRuntime } from "./flow/dispatcher.js";
+import {
+  setAvalonPublicBaseUrl,
+  setAvalonSessionVerifyKey,
+} from "./web-routes.js";
 
 const started = await buildPlugin().start();
 // Hand the live bot RPC + logger into the component dispatcher — the
@@ -13,3 +17,9 @@ wireRuntime({
     error: (msg, meta) => started.server.log.error(meta ?? {}, msg),
   },
 });
+// Web-routes' auth needs the bot's Ed25519 public key + the
+// publicBaseUrl, both of which only exist after start() resolves —
+// wire them here so subsequent /api/manage/* calls can verify the
+// SPA's bot-session JWT.
+setAvalonSessionVerifyKey(() => started.getSessionVerifyPublicKey());
+setAvalonPublicBaseUrl(() => started.getPublicBaseUrl());

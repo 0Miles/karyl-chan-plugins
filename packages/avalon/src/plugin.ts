@@ -13,6 +13,23 @@ import { t } from "./i18n/index.js";
 import { startSignup } from "./flow/signup.js";
 import { onComponent } from "./flow/dispatcher.js";
 import { getGame, removeGame, withChannelLock } from "./game/store.js";
+import {
+  effectiveBase,
+  registerWebRoutes,
+  setPublicUrlEnvFallback,
+} from "./web-routes.js";
+
+const AVALON_PUBLIC_URL_ENV = process.env.AVALON_PUBLIC_URL
+  ? process.env.AVALON_PUBLIC_URL.replace(/\/+$/, "")
+  : undefined;
+// Propagate env fallback into web-routes.ts at module init time so
+// effectiveBase() can use it before any SDK wiring happens.
+setPublicUrlEnvFallback(AVALON_PUBLIC_URL_ENV);
+
+/** Discord component-v1 action row with a single Link button. */
+function linkButtonRow(label: string, url: string): unknown {
+  return { type: 1, components: [{ type: 2, style: 5, label, url }] };
+}
 
 /**
  * Build the karyl-avalon plugin instance.
@@ -58,6 +75,11 @@ export function buildPlugin() {
             name: "stop",
             description: t(undefined, "command.avalon.stop.description"),
           },
+          {
+            type: "sub_command",
+            name: "manage",
+            description: t(undefined, "command.avalon.manage.description"),
+          },
         ],
         handler: async (ctx: CommandContext): Promise<CommandReply> => {
           const guildId = ctx.guildId;
@@ -79,6 +101,36 @@ export function buildPlugin() {
               removeGame(channelId);
               return t(undefined, "error.stopped");
             });
+          }
+          if (sub === "manage") {
+            // 15-min bot JWT — only used to bootstrap a plugin-side
+            // manage session (access + refresh) on first load.
+            const res = (await ctx.botRpc("/api/plugin/auth.session", {
+              user_id: ctx.userId,
+              kind: "manage",
+            })) as { allowed?: boolean; token?: string } | null;
+            if (res === null) {
+              return {
+                content: `⚠ ${t(undefined, "manage.botRejected")}`,
+                ephemeral: true,
+              };
+            }
+            if (res.allowed !== true || typeof res.token !== "string") {
+              return {
+                content: `⚠ ${t(undefined, "manage.notAllowed")}`,
+                ephemeral: true,
+              };
+            }
+            return {
+              content: `🔧 **${t(undefined, "manage.title")}**\n${t(undefined, "manage.description")}`,
+              components: [
+                linkButtonRow(
+                  `🔧 ${t(undefined, "manage.openButton")}`,
+                  `${effectiveBase()}/?token=${res.token}`,
+                ),
+              ],
+              ephemeral: true,
+            };
           }
           // Default: start.
           return startSignup(ctx, guildId, channelId);
@@ -128,9 +180,8 @@ export function buildPlugin() {
         description: "Access the Avalon admin WebUI (list / force-stop games).",
       },
     ],
-    onReady: async () => {
-      // WebUI routes register here (added in a later commit so this
-      // first scaffold focuses on the gameplay path). Reserved hook.
+    onReady: async (server) => {
+      await registerWebRoutes(server, effectiveBase);
     },
   });
 }

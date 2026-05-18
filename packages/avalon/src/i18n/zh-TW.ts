@@ -12,6 +12,15 @@ export const zhTW = {
   "command.avalon.description": "阿瓦隆桌遊機器人",
   "command.avalon.start.description": "在此頻道開始一場新對局",
   "command.avalon.stop.description": "強制終止此頻道進行中的對局",
+  "command.avalon.manage.description": "取得阿瓦隆管理 WebUI 的一次性連結",
+  "manage.title": "阿瓦隆管理面板",
+  "manage.description":
+    "查看進行中對局與報名，必要時可強制終止。15 分鐘內開啟連結；瀏覽頁籤之後會自動續約最多 1 天。",
+  "manage.openButton": "開啟管理 WebUI",
+  "manage.notAllowed":
+    "你沒有阿瓦隆 WebUI 的存取權限。請管理員授予 `plugin:karyl-avalon:webui.access` 給你的角色。",
+  "manage.botRejected":
+    "Bot 拒絕了登入請求 — 可能 `auth.session` RPC scope 尚未核可。",
 
   "stage.signup.title": "開始新遊戲",
   "stage.signup.content":
