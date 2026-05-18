@@ -123,6 +123,19 @@ const MAX_PLAYED = 100;
 const states = new Map<string, GuildState>();
 let nextQid = 1;
 
+/**
+ * Per-guild monotonic counter that bumps every time the playlist is
+ * cleared, reset, or otherwise replaced. Lives outside `GuildState`
+ * so it survives `reset()` deleting the state entry — callers that
+ * captured epoch=N before a slow resolve can still detect that a
+ * `/radio stop` ran in the meantime (state was destroyed and the
+ * epoch incremented).
+ */
+const epochs = new Map<string, number>();
+function bumpEpoch(guildId: string): void {
+  epochs.set(guildId, (epochs.get(guildId) ?? 0) + 1);
+}
+
 function ensure(guildId: string): GuildState {
   let s = states.get(guildId);
   if (!s) {
@@ -190,11 +203,23 @@ export function requeueFront(guildId: string, track: Track): void {
 /** Drop the upcoming portion — leaves played + current intact. */
 export function clearQueue(guildId: string): void {
   const s = ensure(guildId);
+  bumpEpoch(guildId);
   if (s.cursor < 0) {
     s.tracks.length = 0;
     return;
   }
   s.tracks.length = s.cursor + 1;
+}
+
+/**
+ * Snapshot the current session epoch. Bumps on every `clearQueue` /
+ * `reset`. Callers that resolve external sources outside the guild
+ * lock should capture the epoch first, then re-check it under the
+ * lock before enqueueing — if the value changed the session was
+ * replaced and the resolved tracks are stale.
+ */
+export function getEpoch(guildId: string): number {
+  return epochs.get(guildId) ?? 0;
 }
 
 /**
@@ -471,6 +496,7 @@ export function setCurrent(_guildId: string, _track: Track | null): void {
 
 export function reset(guildId: string): void {
   states.delete(guildId);
+  bumpEpoch(guildId);
 }
 
 /** Snapshot the live guild-id set so callers can lock each one. */

@@ -45,6 +45,7 @@ import {
   dequeueByQids,
   enqueue,
   getCurrent,
+  getEpoch,
   getState,
   peekNext,
   reorderByQid,
@@ -977,6 +978,13 @@ export async function registerWebRoutes(
       // whoever is clicking the WebUI now — don't misattribute.
       // Resolve outside the lock (it's a read, and can take seconds); only
       // the enqueue + sync below run under it.
+      //
+      // Snapshot the session epoch before the (slow) resolve. If
+      // anything bumps it during resolve (`/radio play <new>` ran
+      // `clearQueue`, or `/radio stop` ran `reset`), the resolved
+      // tracks are stale and we drop them rather than enqueue into
+      // a session that's moved on.
+      const epochAtStart = getEpoch(guildId);
       let toQueue: Track[];
       if (isYouTubePlaylistUrl(source)) {
         try {
@@ -1019,6 +1027,14 @@ export async function registerWebRoutes(
         }
       }
       return withGuildLock(guildId, async () => {
+        if (getEpoch(guildId) !== epochAtStart) {
+          // Session was cleared / reset while we were resolving — abort
+          // rather than push these tracks into a different session.
+          return reply.code(409).send({
+            error:
+              "Session changed while resolving — please retry from the current state.",
+          });
+        }
         keepAdvancing(guildId);
         for (const t of toQueue) enqueue(guildId, t);
         return syncAndSnapshot(guildId);
