@@ -18,7 +18,7 @@ export const zhTW = {
     "查看進行中對局與報名，必要時可強制終止。15 分鐘內開啟連結；瀏覽頁籤之後會自動續約最多 1 天。",
   "manage.openButton": "開啟管理 WebUI",
   "manage.notAllowed":
-    "你沒有阿瓦隆 WebUI 的存取權限。請管理員授予 `plugin:karyl-avalon:webui.access` 給你的角色。",
+    "你沒有阿瓦隆 WebUI 的存取權限。請管理員授予 `plugin:karyl-avalon:manage` 給你的角色。",
   "manage.botRejected":
     "Bot 拒絕了登入請求 — 可能 `auth.session` RPC scope 尚未核可。",
 

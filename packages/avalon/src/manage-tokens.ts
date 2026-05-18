@@ -3,7 +3,7 @@
  * scheme so the WebUI auth surface is consistent across plugins:
  *
  *  1. Admin runs `/avalon manage` → bot mints a 15-min plugin-session
- *     JWT carrying `plugin:karyl-avalon:webui.access`.
+ *     JWT carrying `plugin:karyl-avalon:manage`.
  *  2. The SPA POSTs that JWT to `/api/manage/exchange` → plugin issues
  *     an access (5 min) + refresh (24 h) pair signed by *this* plugin
  *     process.

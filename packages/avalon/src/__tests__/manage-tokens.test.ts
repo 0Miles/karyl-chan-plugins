@@ -4,7 +4,7 @@ import {
   verifyManageToken,
 } from "../manage-tokens.js";
 
-const CAPS = ["plugin:karyl-avalon:webui.access"];
+const CAPS = ["plugin:karyl-avalon:manage"];
 
 describe("mt-001: issued access token verifies as manage-access", () => {
   it("round-trip access token", () => {

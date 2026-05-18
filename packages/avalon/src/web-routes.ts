@@ -30,7 +30,7 @@ import {
 } from "./art.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
-const WEBUI_CAP = "webui.access";
+const MANAGE_CAP = "manage";
 
 // ── Deferred wiring from index.ts ─────────────────────────────────────
 // The manage routes need things the SDK only produces after start():
@@ -98,9 +98,9 @@ function authManageBootstrap(
 ): PluginSessionClaims | null {
   const claims = auth(request, reply);
   if (!claims) return null;
-  if (!hasPluginCapability(claims.capabilities, PLUGIN_KEY, WEBUI_CAP)) {
+  if (!hasPluginCapability(claims.capabilities, PLUGIN_KEY, MANAGE_CAP)) {
     reply.code(403).send({
-      error: `Missing capability plugin:${PLUGIN_KEY}:${WEBUI_CAP} — ask an admin to grant it to your role.`,
+      error: `Missing capability plugin:${PLUGIN_KEY}:${MANAGE_CAP} — ask an admin to grant it to your role.`,
     });
     return null;
   }
@@ -122,9 +122,9 @@ function authManageAccess(
     reply.code(401).send({ error: "Invalid or expired access token" });
     return null;
   }
-  if (!hasPluginCapability(claims.capabilities, PLUGIN_KEY, WEBUI_CAP)) {
+  if (!hasPluginCapability(claims.capabilities, PLUGIN_KEY, MANAGE_CAP)) {
     reply.code(403).send({
-      error: `Missing capability plugin:${PLUGIN_KEY}:${WEBUI_CAP} — ask an admin to grant it to your role.`,
+      error: `Missing capability plugin:${PLUGIN_KEY}:${MANAGE_CAP} — ask an admin to grant it to your role.`,
     });
     return null;
   }

@@ -133,7 +133,7 @@ Test surfaces:
 
 | id     | invariant                                                | trigger                                                | expected                          | target file/line     |
 |--------|----------------------------------------------------------|--------------------------------------------------------|-----------------------------------|----------------------|
-| mt-001 | issued access token verifies                             | `issueManagePair("u",["plugin:karyl-avalon:webui.access"])` → verify access | claims match; purpose=access | `manage-tokens.ts:70-87`, `89-144` |
+| mt-001 | issued access token verifies                             | `issueManagePair("u",["plugin:karyl-avalon:manage"])` → verify access | claims match; purpose=access | `manage-tokens.ts:70-87`, `89-144` |
 | mt-002 | refresh token verifies as refresh, not access            | issue, then verify refresh as `"manage-access"`        | null                              | `manage-tokens.ts:127`     |
 | mt-003 | tampered signature rejected                              | issue, mutate signature segment, verify                | null                              | `manage-tokens.ts:113-117` |
 | mt-004 | expired token rejected                                   | issue with TTL = 0; sleep; verify                      | null                              | `manage-tokens.ts:135`     |

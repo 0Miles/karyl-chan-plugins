@@ -415,7 +415,7 @@ Auth chain:
 Auth model:
 - `auth()`: bot-issued plugin-session JWT (Ed25519, 15 min); required for
   /exchange only. Verify key comes from `setAvalonSessionVerifyKey()`.
-- `authManageBootstrap()`: bot JWT + plugin capability `plugin:karyl-avalon:webui.access`.
+- `authManageBootstrap()`: bot JWT + plugin capability `plugin:karyl-avalon:manage`.
 - `authManageAccess()`: plugin-issued HMAC-SHA256 access JWT (5 min);
   refresh path mints a new pair. Secret is `randomBytes(32)` at module
   init, so process restart wipes all live manage sessions.

@@ -181,7 +181,7 @@ export function buildPlugin() {
     ],
     capabilities: [
       {
-        key: "webui.access",
+        key: "manage",
         description: "Access the Avalon admin WebUI (list / force-stop games).",
       },
     ],
