@@ -27,6 +27,7 @@ import { openAppoint } from "./stages-appoint.js";
 import { openLake, lakeIsDueAfterRound } from "./stages-lake.js";
 import { openAssassinate } from "./stages-assassinate.js";
 import { missionProgressLine } from "./presentation.js";
+import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 
 /**
@@ -55,7 +56,14 @@ export async function openPrivateVote(
     embeds: [renderPrivateVoteEmbed(state, missionMembers, 0)],
     components: privateVoteComponents(),
   });
-  if (!sent) return;
+  if (!sent) {
+    runtime().log.error("avalon: failed to open privateVote stage", {
+      channelId: state.channelId,
+      round: state.round,
+      stage: "privateVote",
+    });
+    return;
+  }
   state.current = {
     kind: "privateVote",
     messageId: sent.id,

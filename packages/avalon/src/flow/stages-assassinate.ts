@@ -21,6 +21,7 @@ import {
   type DiscordButton,
 } from "./discord.js";
 import { truncate } from "./presentation.js";
+import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 
 /**
@@ -38,6 +39,10 @@ export async function openAssassinate(state: GameState): Promise<void> {
   if (!assassin) {
     // Should be impossible — every legal Avalon table has an assassin.
     // Bail to ending with the missions verdict that's already in hand.
+    runtime().log.error("avalon: no assassin in deck on assassinate stage", {
+      channelId: state.channelId,
+      stage: "assassinate",
+    });
     return;
   }
   const sent = await sendMessage({
@@ -45,7 +50,14 @@ export async function openAssassinate(state: GameState): Promise<void> {
     embeds: [renderAssassinateEmbed(assassin.displayName)],
     components: assassinateComponents(state),
   });
-  if (!sent) return;
+  if (!sent) {
+    runtime().log.error("avalon: failed to open assassinate stage", {
+      channelId: state.channelId,
+      round: state.round,
+      stage: "assassinate",
+    });
+    return;
+  }
   state.current = {
     kind: "assassinate",
     messageId: sent.id,

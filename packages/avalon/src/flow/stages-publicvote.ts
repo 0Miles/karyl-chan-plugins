@@ -22,6 +22,7 @@ import {
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
 import { missionProgressLine } from "./presentation.js";
+import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 
 /**
@@ -44,7 +45,14 @@ export async function openPublicVote(
     embeds: [renderPublicVoteEmbed(state, missionMembers, {})],
     components: publicVoteComponents(),
   });
-  if (!sent) return;
+  if (!sent) {
+    runtime().log.error("avalon: failed to open publicVote stage", {
+      channelId: state.channelId,
+      round: state.round,
+      stage: "publicVote",
+    });
+    return;
+  }
   state.current = {
     kind: "publicVote",
     messageId: sent.id,

@@ -20,6 +20,7 @@ import {
   type DiscordButton,
 } from "./discord.js";
 import { missionProgressLine, truncate } from "./presentation.js";
+import { runtime } from "./runtime.js";
 import { openPublicVote } from "./stages-publicvote.js";
 
 /**
@@ -40,9 +41,15 @@ export async function openAppoint(state: GameState): Promise<void> {
     components: appointComponents(state, []),
   });
   if (!sent) {
-    // Permission glitch or RPC hiccup — caller (channel lock holder)
-    // will see the unset state.current and can surface a generic
-    // "❌ failed to post the appoint board" if they want. We log only.
+    // B-016: surface the failure so SREs can correlate against
+    // Discord rate-limit / outage incidents. state.current stays null;
+    // the game falls into a stalled-but-stoppable mode where the host
+    // can use /avalon stop to clear it.
+    runtime().log.error("avalon: failed to open appoint stage", {
+      channelId: state.channelId,
+      round: state.round,
+      stage: "appoint",
+    });
     return;
   }
   state.current = {

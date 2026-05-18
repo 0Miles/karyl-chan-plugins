@@ -34,24 +34,38 @@ export interface RpcCall {
   body: unknown;
 }
 
+export interface LogEntry {
+  level: "info" | "warn" | "error";
+  msg: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface InstalledHarness {
   calls: RpcCall[];
+  logs: LogEntry[];
   /** Pull calls whose `path` matches `pathSubstring` and reset the filter. */
   callsTo: (pathSubstring: string) => RpcCall[];
+  /** Pull log entries at a given level (and optionally with a msg substring). */
+  logsAt: (level: LogEntry["level"], msgSubstring?: string) => LogEntry[];
   /** Get the most-recent message id the fake handed out, or null. */
   lastMessageId: () => string | null;
   /** Reset the RPC call log mid-test. */
   resetCalls: () => void;
+  /** Force subsequent `messages.send` calls to return null (simulate RPC failure). */
+  forceSendFailure: (on: boolean) => void;
 }
 
 let _msgCounter = 0;
 
 export function installFakeRuntime(): InstalledHarness {
   const calls: RpcCall[] = [];
+  const logs: LogEntry[] = [];
+  let sendShouldFail = false;
 
   const botRpc: BotRpc = async (path, body) => {
     calls.push({ path, body });
     if (path === "/api/plugin/messages.send") {
+      if (sendShouldFail) return null;
       const channelId =
         (body as { channel_id?: string } | undefined)?.channel_id ?? "unknown";
       _msgCounter++;
@@ -65,9 +79,9 @@ export function installFakeRuntime(): InstalledHarness {
   };
 
   const log: Logger = {
-    info: () => undefined,
-    warn: () => undefined,
-    error: () => undefined,
+    info: (msg, meta) => logs.push({ level: "info", msg, meta }),
+    warn: (msg, meta) => logs.push({ level: "warn", msg, meta }),
+    error: (msg, meta) => logs.push({ level: "error", msg, meta }),
   };
 
   wireRuntime({
@@ -78,11 +92,17 @@ export function installFakeRuntime(): InstalledHarness {
 
   return {
     calls,
+    logs,
     callsTo: (sub) => calls.filter((c) => c.path.includes(sub)),
-    lastMessageId: () =>
-      _msgCounter > 0 ? `msg-${_msgCounter}` : null,
+    logsAt: (level, sub) =>
+      logs.filter((l) => l.level === level && (!sub || l.msg.includes(sub))),
+    lastMessageId: () => (_msgCounter > 0 ? `msg-${_msgCounter}` : null),
     resetCalls: () => {
       calls.length = 0;
+      logs.length = 0;
+    },
+    forceSendFailure: (on) => {
+      sendShouldFail = on;
     },
   };
 }

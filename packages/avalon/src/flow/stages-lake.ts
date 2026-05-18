@@ -23,6 +23,7 @@ import {
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
 import { truncate } from "./presentation.js";
+import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 
 /**
@@ -50,7 +51,14 @@ export async function openLake(state: GameState): Promise<void> {
     embeds: [renderLakeEmbed(state, holder.displayName)],
     components: lakeComponents(state),
   });
-  if (!sent) return;
+  if (!sent) {
+    runtime().log.error("avalon: failed to open lake stage", {
+      channelId: state.channelId,
+      round: state.round,
+      stage: "lake",
+    });
+    return;
+  }
   state.current = {
     kind: "lake",
     messageId: sent.id,
