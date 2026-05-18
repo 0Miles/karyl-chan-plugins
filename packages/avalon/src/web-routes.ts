@@ -15,8 +15,9 @@ import {
   type ManageClaims,
 } from "./manage-tokens.js";
 import { PLUGIN_KEY } from "./constants.js";
-import { listGames, removeGame } from "./game/store.js";
+import { getGame, listGames, removeGame } from "./game/store.js";
 import { listSignups, removeSignup } from "./flow/signup.js";
+import { clearCurrentStageButtons } from "./flow/stop.js";
 import {
   artFilePath,
   extForMime,
@@ -250,8 +251,11 @@ export async function registerWebRoutes(
       let removed = false;
       // Game first — that's the more common case. Then signup, since
       // they share a channel slot.
-      const games = listGames();
-      if (games.find((g) => g.channelId === channelId)) {
+      const stale = getGame(channelId);
+      if (stale) {
+        // Strip live-looking buttons on the active stage board first
+        // (B-002 mirrors the /avalon stop slash path).
+        await clearCurrentStageButtons(stale);
         removeGame(channelId);
         removed = true;
       }

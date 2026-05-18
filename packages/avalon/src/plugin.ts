@@ -12,6 +12,7 @@ import { EMBED_COLOR, PLUGIN_KEY, PLUGIN_NAME, PLUGIN_VERSION } from "./constant
 import { t } from "./i18n/index.js";
 import { startSignup } from "./flow/signup.js";
 import { onComponent } from "./flow/dispatcher.js";
+import { clearCurrentStageButtons } from "./flow/stop.js";
 import { getGame, removeGame, withChannelLock } from "./game/store.js";
 import {
   effectiveBase,
@@ -98,6 +99,10 @@ export function buildPlugin() {
               ) {
                 return t(undefined, "error.notHostCannotStop");
               }
+              // B-002: strip live-looking buttons from the active stage
+              // board so the channel's scrollback doesn't keep clickable
+              // remnants of the just-stopped game.
+              await clearCurrentStageButtons(existing);
               removeGame(channelId);
               return t(undefined, "error.stopped");
             });
