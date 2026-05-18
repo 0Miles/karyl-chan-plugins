@@ -1,9 +1,9 @@
-import { EMBED_COLOR } from "../constants.js";
 import { t } from "../i18n/index.js";
 import { type GameState, type Verdict } from "../game/state.js";
 import { ROLES } from "../game/roles.js";
 import { removeGame } from "../game/store.js";
 import { sendMessage } from "./discord.js";
+import { FACTION_COLOR, missionProgressLine } from "./presentation.js";
 
 /**
  * End-of-game board. Reveals every seat's role and the reason the
@@ -24,11 +24,16 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
     embeds: [
       {
         title: arthurWin
-          ? t(undefined, "stage.ending.titleArthur")
-          : t(undefined, "stage.ending.titleMordred"),
+          ? `🏆 ${t(undefined, "stage.ending.titleArthur")}`
+          : `🗡 ${t(undefined, "stage.ending.titleMordred")}`,
         description: reasonText(verdict),
-        color: EMBED_COLOR,
+        color: arthurWin ? FACTION_COLOR.arthur : FACTION_COLOR.mordred,
         fields: [
+          {
+            name: t(undefined, "stage.board.fieldProgress"),
+            value: missionProgressLine(state),
+            inline: false,
+          },
           {
             name: t(undefined, "stage.ending.fieldRoster"),
             value: rosterLines.join("\n"),

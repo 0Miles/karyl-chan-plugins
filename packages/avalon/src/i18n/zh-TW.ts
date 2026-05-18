@@ -58,6 +58,7 @@ export const zhTW = {
   "stage.board.fieldPlayers": "玩家",
   "stage.board.fieldRoundStatus": "任務狀態",
   "stage.board.fieldVoteStatus": "投票次數",
+  "stage.board.fieldProgress": "任務進度",
 
   "stage.appoint.title": "第 {round} 輪：派任務",
   "stage.appoint.content": "由 {leader} 指派 **{num}** 員參與此次任務。",
@@ -153,6 +154,13 @@ export const zhTW = {
   "role.oberon": "奧伯倫",
   "role.loyal": "亞瑟的忠臣",
   "role.minion": "莫德雷德的爪牙",
+  "role.flavor.merlin": "✨ 你是 **梅林** — 你看得見莫甘娜、刺客、奧伯倫（莫德雷德除外）。別讓刺客找出你。",
+  "role.flavor.percival": "🛡 你是 **派西維爾** — 你看見梅林與莫甘娜，但分不清誰是誰。保護真正的梅林。",
+  "role.flavor.assassin": "🗡 你是 **刺客** — 三次任務成功後，你有一發子彈擊殺梅林、反敗為勝。",
+  "role.flavor.morgana": "🎭 你是 **莫甘娜** — 派西維爾會把你誤認成梅林。儘量假裝藍方。",
+  "role.flavor.mordred": "👑 你是 **莫德雷德** — 連梅林也看不見你，潛伏吧。",
+  "role.flavor.oberon": "🦉 你是 **奧伯倫** — 你看不見隊友、隊友也看不見你。獨自破壞任務。",
+  "role.flavor.loyal": "💙 你是 **亞瑟的忠臣** — 你看不見任何身份。觀察行為，跟隨梅林的暗示。",
   "faction.arthur": "亞瑟陣營",
   "faction.mordred": "莫德雷德陣營",
 } as const;

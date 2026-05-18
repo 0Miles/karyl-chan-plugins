@@ -6,7 +6,6 @@ import {
 import { EMBED_COLOR, PLUGIN_KEY } from "../constants.js";
 import { t } from "../i18n/index.js";
 import { playerByUserId, type GameState } from "../game/state.js";
-import { ROLES } from "../game/roles.js";
 import { buildVision } from "../game/vision.js";
 import { getGame } from "../game/store.js";
 import { followupEphemeral, sendMessage } from "./discord.js";
@@ -53,7 +52,6 @@ export async function sendDealBoard(state: GameState): Promise<void> {
 export function renderDealReveal(state: GameState, viewerUserId: string) {
   const viewer = playerByUserId(state, viewerUserId);
   if (!viewer) return null;
-  const role = ROLES[viewer.position];
   const vision = buildVision(state, viewer);
   const legend =
     viewer.position === "percival"
@@ -63,13 +61,14 @@ export function renderDealReveal(state: GameState, viewerUserId: string) {
     const marker = markerEmoji(row.marker);
     return `${seatEmoji(row.seat)} ${marker} ${row.player.displayName}`;
   });
+  // Pull the role-flavor blurb if there is one; loyal/loose roles
+  // share a generic line. The flavour text repeats the role name so
+  // we drop the older `stage.deal.yourRole` line for it.
+  const flavorKey = `role.flavor.${viewer.position}` as const;
   return {
     color: EMBED_COLOR,
     title: t(undefined, "stage.deal.title"),
-    description:
-      t(undefined, "stage.deal.yourRole", { role: t(undefined, role.nameKey) }) +
-      "\n" +
-      legend,
+    description: t(undefined, flavorKey) + "\n\n" + legend,
     fields: [
       {
         name: t(undefined, "stage.deal.vision"),

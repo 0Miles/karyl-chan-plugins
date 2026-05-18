@@ -26,6 +26,7 @@ import {
 import { openAppoint } from "./stages-appoint.js";
 import { openLake, lakeIsDueAfterRound } from "./stages-lake.js";
 import { openAssassinate } from "./stages-assassinate.js";
+import { missionProgressLine } from "./presentation.js";
 import { endGame } from "./stages-ending.js";
 
 /**
@@ -253,6 +254,11 @@ function renderPrivateVoteEmbed(
     .map((p) => `\`${p.index + 1}\` ${p.displayName}`)
     .join("\n");
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    {
+      name: t(undefined, "stage.board.fieldProgress"),
+      value: missionProgressLine(state),
+      inline: false,
+    },
     {
       name: t(undefined, "stage.privateVote.fieldRoster"),
       value: rosterLines || "—",

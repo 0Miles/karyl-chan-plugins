@@ -21,6 +21,7 @@ import {
   type DiscordActionRow,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
+import { missionProgressLine } from "./presentation.js";
 import { endGame } from "./stages-ending.js";
 
 /**
@@ -166,6 +167,11 @@ function renderPublicVoteEmbed(
     .join("\n");
   const voted = Object.keys(votes).length;
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    {
+      name: t(undefined, "stage.board.fieldProgress"),
+      value: missionProgressLine(state),
+      inline: false,
+    },
     {
       name: t(undefined, "stage.publicVote.fieldRoster"),
       value: rosterLines || "—",

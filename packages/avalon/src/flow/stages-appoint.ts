@@ -19,7 +19,7 @@ import {
   type DiscordActionRow,
   type DiscordButton,
 } from "./discord.js";
-import { truncate } from "./presentation.js";
+import { missionProgressLine, truncate } from "./presentation.js";
 import { openPublicVote } from "./stages-publicvote.js";
 
 /**
@@ -168,6 +168,11 @@ function renderAppointEmbed(
     }),
     color: EMBED_COLOR,
     fields: [
+      {
+        name: t(undefined, "stage.board.fieldProgress"),
+        value: missionProgressLine(state),
+        inline: false,
+      },
       {
         name: t(undefined, "stage.appoint.fieldSelected"),
         value:
