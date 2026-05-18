@@ -20,7 +20,7 @@ and the advance loop, so it keeps its own package and docker service.
 | `stop` | Stop, clear the queue, leave voice |
 | `np` / `queuelist` | Now-playing card (the embed + control buttons below; ephemeral, not auto-updated) / show the queue |
 | `stations` | List the built-in radio stations |
-| `manage` | Get a private link to the admin WebUI (requires the `plugin:karyl-radio:webui.access` capability — bot owners/admins exempt) |
+| `manage` | Get a private link to the admin WebUI (requires the `plugin:karyl-radio:manage` capability — bot owners/admins exempt) |
 
 `source` for `play`/`queue` auto-resolves a station key, a library track
 title/ID, a direct http(s) media URL, a YouTube URL, or a track page on

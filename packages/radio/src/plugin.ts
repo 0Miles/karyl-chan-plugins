@@ -407,7 +407,7 @@ export default function buildPlugin() {
     ],
     capabilities: [
       definePluginCapability({
-        key: "webui.access",
+        key: "manage",
         description:
           "Access the radio admin WebUI (manage / edit / delete library tracks)",
       }),
@@ -433,7 +433,7 @@ export default function buildPlugin() {
             contexts: ["Guild"],
             // Anyone who can join voice can use it; the admin-ish bits
             // are gated separately (download → plugin:karyl-radio:download
-            // capability; manage → plugin:karyl-radio:webui.access).
+            // capability; manage → plugin:karyl-radio:manage).
             defaultMemberPermissions: "Connect",
             options: [
               {
@@ -612,7 +612,7 @@ export default function buildPlugin() {
                     if (res.allowed !== true || typeof res.token !== "string") {
                       return {
                         content:
-                          `⚠ You're not allowed to manage Karyl Radio. Need the \`plugin:${PLUGIN_KEY}:webui.access\` capability ` +
+                          `⚠ You're not allowed to manage Karyl Radio. Need the \`plugin:${PLUGIN_KEY}:manage\` capability ` +
                           "(bot owners and admins are exempt). Ask an admin to grant it to your role.",
                         ephemeral: true,
                       };

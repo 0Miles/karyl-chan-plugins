@@ -36,7 +36,7 @@ function isManageClaims(claims: { capabilities?: unknown } | null): boolean {
     ? (claims!.capabilities as string[])
     : [];
   return (
-    caps.includes("admin") || caps.includes(`plugin:${PLUGIN_KEY}:webui.access`)
+    caps.includes("admin") || caps.includes(`plugin:${PLUGIN_KEY}:manage`)
   );
 }
 

@@ -79,7 +79,7 @@ import {
 } from "./playlists.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
-const WEBUI_CAP = "webui.access";
+const MANAGE_CAP = "manage";
 /** Files in the music dir that are NOT audio and must never be streamed. */
 const NON_AUDIO_RE = /(^library\.json(\.migrated)?$)|(^playlists\.json(\.migrated)?$)|(^radio\.db(-wal|-shm)?$)|(\.tmp$)/;
 
@@ -298,9 +298,9 @@ export async function registerWebRoutes(
   ): PluginSessionClaims | null {
     const claims = auth(request, reply);
     if (!claims) return null;
-    if (!hasPluginCapability(claims.capabilities, pluginKey, WEBUI_CAP)) {
+    if (!hasPluginCapability(claims.capabilities, pluginKey, MANAGE_CAP)) {
       reply.code(403).send({
-        error: `Missing capability plugin:${pluginKey}:${WEBUI_CAP} — ask an admin to grant it to your role.`,
+        error: `Missing capability plugin:${pluginKey}:${MANAGE_CAP} — ask an admin to grant it to your role.`,
       });
       return null;
     }
@@ -325,9 +325,9 @@ export async function registerWebRoutes(
       reply.code(401).send({ error: "Invalid or expired access token" });
       return null;
     }
-    if (!hasPluginCapability(claims.capabilities, pluginKey, WEBUI_CAP)) {
+    if (!hasPluginCapability(claims.capabilities, pluginKey, MANAGE_CAP)) {
       reply.code(403).send({
-        error: `Missing capability plugin:${pluginKey}:${WEBUI_CAP} — ask an admin to grant it to your role.`,
+        error: `Missing capability plugin:${pluginKey}:${MANAGE_CAP} — ask an admin to grant it to your role.`,
       });
       return null;
     }
