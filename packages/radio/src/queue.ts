@@ -473,36 +473,38 @@ export function reset(guildId: string): void {
   states.delete(guildId);
 }
 
+/** Snapshot the live guild-id set so callers can lock each one. */
+export function activeGuildIds(): string[] {
+  return [...states.keys()];
+}
+
 /**
- * Drop every reference to a library track (by `trackId`) from all
- * guilds. Adjusts each guild's cursor so it keeps pointing at the same
- * Track (or to the next remaining item if the cursor's own track was
- * removed). If purging leaves the session empty, the cursor is reset
- * and loop falls back to "off" so the advance loop can stop ticking.
+ * Purge a track from a single guild's session. Synchronous primitive
+ * meant to run inside `withGuildLock(guildId, ...)`. Returns how many
+ * entries it removed.
  */
-export function purgeTrackId(trackId: string): number {
-  let removed = 0;
-  for (const s of states.values()) {
-    removed += filterTracks(s, (t) => t.trackId === trackId);
-    // Purging the whole session: drop loop too so the advance loop can
-    // stop ticking once the queue is empty.
-    if (s.tracks.length === 0) s.loop = "off";
-  }
+export function purgeTrackIdFromGuild(
+  guildId: string,
+  trackId: string,
+): number {
+  const s = states.get(guildId);
+  if (!s) return 0;
+  const removed = filterTracks(s, (t) => t.trackId === trackId);
+  if (s.tracks.length === 0) s.loop = "off";
   return removed;
 }
 
 /**
- * Counterpart to `purgeTrackId` for stored playlists: drop every track
- * a deleted playlist had pushed onto any guild queue (matched via
- * `playlistId`). Called from `removePlaylist` so a deleted playlist
- * leaves no orphan entries with stale provenance behind. Same
- * cursor-anchoring + empty-queue loop reset as `purgeTrackId`.
+ * Per-guild counterpart for stored playlists. Same locking contract as
+ * `purgeTrackIdFromGuild`.
  */
-export function purgePlaylistId(playlistId: string): number {
-  let removed = 0;
-  for (const s of states.values()) {
-    removed += filterTracks(s, (t) => t.playlistId === playlistId);
-    if (s.tracks.length === 0) s.loop = "off";
-  }
+export function purgePlaylistIdFromGuild(
+  guildId: string,
+  playlistId: string,
+): number {
+  const s = states.get(guildId);
+  if (!s) return 0;
+  const removed = filterTracks(s, (t) => t.playlistId === playlistId);
+  if (s.tracks.length === 0) s.loop = "off";
   return removed;
 }

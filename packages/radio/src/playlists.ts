@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
-import { purgePlaylistId } from "./queue.js";
+import { activeGuildIds, purgePlaylistIdFromGuild } from "./queue.js";
+import { withGuildLock } from "./guild-lock.js";
 import { getDb } from "./db.js";
 
 /**
@@ -220,7 +221,16 @@ export async function removePlaylist(id: string): Promise<boolean> {
   const info = getDb().prepare("DELETE FROM playlists WHERE id = ?").run(id);
   if (info.changes === 0) return false;
   // Drop any queue entries this playlist had pushed onto live sessions
-  // so the deleted id doesn't sit there as dangling provenance.
-  purgePlaylistId(id);
+  // so the deleted id doesn't sit there as dangling provenance. Run
+  // through each guild's `withGuildLock` so we don't splice the
+  // tracks array while the advance loop's mid-await `commitCursor`
+  // still holds a stale index.
+  await Promise.all(
+    activeGuildIds().map((gid) =>
+      withGuildLock(gid, async () => {
+        purgePlaylistIdFromGuild(gid, id);
+      }),
+    ),
+  );
   return true;
 }

@@ -8,7 +8,8 @@ import {
   type DownloadProgress,
 } from "./downloader.js";
 import { deleteCoverFor } from "./covers.js";
-import { purgeTrackId } from "./queue.js";
+import { activeGuildIds, purgeTrackIdFromGuild } from "./queue.js";
+import { withGuildLock } from "./guild-lock.js";
 import { getDb } from "./db.js";
 
 export interface LibraryTrack {
@@ -120,8 +121,18 @@ export async function removeTrack(id: string): Promise<boolean> {
   await deleteCoverFor(id);
   getDb().prepare("DELETE FROM tracks WHERE id = ?").run(id);
   // Drop any ghost references from playback queues so a now-missing
-  // file doesn't sit un-playable in someone's queue.
-  purgeTrackId(id);
+  // file doesn't sit un-playable in someone's queue. Goes through
+  // each guild's `withGuildLock` so it can't race with the advance
+  // loop's `peekNext → await voice.play → commitCursor` sequence —
+  // an in-flight `commitCursor(idx)` from before the purge would
+  // otherwise land on whatever shifted into that slot.
+  await Promise.all(
+    activeGuildIds().map((gid) =>
+      withGuildLock(gid, async () => {
+        purgeTrackIdFromGuild(gid, id);
+      }),
+    ),
+  );
   return true;
 }
 
