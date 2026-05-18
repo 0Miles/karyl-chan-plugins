@@ -246,10 +246,60 @@ export async function resolveMixRecommendations(
  *  block the 5 s advance loop forever. */
 const DEFAULT_YTDLP_TIMEOUT_MS = 120_000;
 
-function runYtDlp(
+/**
+ * Cap on yt-dlp processes that may run concurrently. Each one peaks
+ * around 80-150 MB RSS (Python runtime + yt-dlp bytecode); 20 guilds
+ * hitting `needsResolve` at the same tick used to spawn 20 in parallel
+ * → multi-GB RAM spike + Google rate-limiting on the source-IP.
+ *
+ * 4 is a conservative default; tune via env if running on a large
+ * host. Calls that exceed the cap queue rather than throw, so the
+ * advance loop just waits its turn rather than failing the play.
+ */
+const YTDLP_MAX_CONCURRENCY = (() => {
+  const raw = parseInt(process.env.RADIO_YTDLP_MAX_CONCURRENCY ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 4;
+})();
+
+let ytdlpInflight = 0;
+const ytdlpWaiters: Array<() => void> = [];
+
+function acquireYtdlpSlot(): Promise<void> {
+  if (ytdlpInflight < YTDLP_MAX_CONCURRENCY) {
+    ytdlpInflight++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    ytdlpWaiters.push(() => {
+      ytdlpInflight++;
+      resolve();
+    });
+  });
+}
+
+function releaseYtdlpSlot(): void {
+  ytdlpInflight--;
+  const next = ytdlpWaiters.shift();
+  if (next) next();
+}
+
+async function runYtDlp(
   args: string[],
   onProgress?: (p: DownloadProgress) => void,
   timeoutMs: number = DEFAULT_YTDLP_TIMEOUT_MS,
+): Promise<string> {
+  await acquireYtdlpSlot();
+  try {
+    return await spawnYtDlp(args, onProgress, timeoutMs);
+  } finally {
+    releaseYtdlpSlot();
+  }
+}
+
+function spawnYtDlp(
+  args: string[],
+  onProgress: ((p: DownloadProgress) => void) | undefined,
+  timeoutMs: number,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn("yt-dlp", args, { stdio: ["ignore", "pipe", "pipe"] });
