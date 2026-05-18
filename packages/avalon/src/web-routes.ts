@@ -269,15 +269,34 @@ export async function registerWebRoutes(
   }
 
   server.get("/", async (_request, reply) => {
-    const base = getEffectiveBase();
-    // Pull `?token=…` through from the URL; the SPA reads it client-side.
-    // No need to splice it server-side.
+    // Inject the path part of the bot's publicBaseUrl so the SPA knows
+    // its prefix when served through the bot proxy (e.g.
+    // `/plugin/karyl-avalon`). Done per-request so a late-arriving
+    // publicBaseUrl is picked up immediately.
+    let basePath = "";
+    try {
+      basePath = new URL(getEffectiveBase()).pathname.replace(/\/+$/, "");
+    } catch {
+      // Malformed URL — leave basePath empty; SPA falls back to same-origin.
+    }
     const html = loadIndexHtml().replace(
       /__PLUGIN_BASE__\s*=\s*"[^"]*"/,
-      `__PLUGIN_BASE__ = ""`,
+      `__PLUGIN_BASE__ = "${basePath}"`,
     );
-    void base;
     reply.header("content-type", "text/html; charset=utf-8");
+    // The vite-plugin-singlefile bundle inlines every JS + CSS chunk
+    // into the HTML, so the bot proxy's strict default CSP
+    // (`script-src 'self'; style-src 'self'`) would block them. Send
+    // our own CSP that allows inline JS+CSS but locks everything else
+    // down. fastify/reply-from copies upstream headers over the bot's,
+    // so this is the effective CSP that lands at the browser.
+    reply.header(
+      "Content-Security-Policy",
+      "default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'; " +
+        "script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+    );
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "no-referrer");
     return html;
   });
 
