@@ -121,7 +121,12 @@ export const MAX_AUTOPLAY_FETCH_COUNT = 25;
 const MAX_PLAYED = 100;
 
 const states = new Map<string, GuildState>();
-let nextQid = 1;
+// Seed from a high random offset (53-bit safe range) so a WebUI tab
+// that's holding qid=5 from before a plugin restart doesn't collide
+// with the freshly-minted qid=5 of a brand-new session. Pre-restart
+// the counter would have walked back to 1 → a stale dequeue/jump
+// would have acted on a completely different track.
+let nextQid = Math.floor(Math.random() * 2 ** 40) + 1;
 
 /**
  * Per-guild monotonic counter that bumps every time the playlist is
