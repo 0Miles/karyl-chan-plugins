@@ -1,0 +1,31 @@
+{
+  "name": "@karyl-chan/plugin-avalon",
+  "version": "0.1.0",
+  "description": "Avalon / Resistance board-game bot — interactive Discord game with shared buttons + ephemeral player views (no DM required).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite build && tsx watch src/index.ts",
+    "build": "rm -rf dist && vite build && tsc",
+    "build:ui": "vite build",
+    "build:server": "tsc",
+    "start": "node dist/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@karyl-chan/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "fastify": "^5.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.7",
+    "vite-plugin-singlefile": "^2.0.3",
+    "vue": "^3.5.13",
+    "vue-i18n": "^11.0.0"
+  }
+}

@@ -51,6 +51,10 @@ interface InteractionPayload {
   sub_command_name: string | null;
   options: Array<{ name: string; type: number; value?: unknown }>;
   guild_id: string | null;
+  /** Channel the slash was invoked in. The bot has been sending this
+   *  since the dispatch service was written — we just hadn't surfaced
+   *  it on `CommandContext`. */
+  channel_id: string | null;
   user: { id: string; username?: string; global_name?: string | null };
   /** Bot-resolved subset of the invoker's RBAC tokens: `admin` + this plugin's `plugin:<key>:*`. */
   member?: { capabilities?: string[] };
@@ -300,6 +304,7 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
         subCommandName: payload.sub_command_name,
         options: readOpts(payload),
         guildId: payload.guild_id,
+        channelId: payload.channel_id,
         userId: payload.user.id,
         userDisplayName:
           payload.user.global_name || payload.user.username || payload.user.id,

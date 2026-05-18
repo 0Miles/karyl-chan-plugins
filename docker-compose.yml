@@ -50,6 +50,18 @@ services:
       PLUGIN_URL: http://karyl-radio-plugin:3000
       KARYL_PLUGIN_SETUP_SECRET: ${KARYL_PLUGIN_SETUP_SECRET_RADIO:-}
 
+  karyl-avalon-plugin:
+    <<: *plugin-base
+    profiles: [avalon]
+    container_name: karyl-avalon-plugin
+    build:
+      context: .
+      dockerfile: Dockerfile.avalon
+    # Reached via the bot proxy at <WEB_BASE_URL>/plugin/karyl-avalon/.
+    environment:
+      PLUGIN_URL: http://karyl-avalon-plugin:3000
+      KARYL_PLUGIN_SETUP_SECRET: ${KARYL_PLUGIN_SETUP_SECRET_AVALON:-}
+
 volumes:
   radio-music:   # downloaded audio files
   radio-covers:  # uploaded cover images

@@ -21,6 +21,8 @@ export interface CommandContext {
   options: Record<string, unknown>;
   /** Guild ID the command was invoked in; null for DM / bot-DM contexts */
   guildId: string | null;
+  /** Channel the command was invoked in; null if Discord didn't send it. */
+  channelId: string | null;
   /** Discord user ID of the invoker */
   userId: string;
   /**
