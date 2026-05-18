@@ -5,33 +5,22 @@ import {
 } from "@karyl-chan/plugin-sdk";
 import { EMBED_COLOR, PLUGIN_KEY } from "../constants.js";
 import { t } from "../i18n/index.js";
-import {
-  factionOf,
-  playerByUserId,
-  type GameState,
-} from "../game/state.js";
+import { playerByUserId, type GameState } from "../game/state.js";
 import { ROLES } from "../game/roles.js";
-import { buildVision, type VisionMarker } from "../game/vision.js";
+import { buildVision } from "../game/vision.js";
 import { getGame } from "../game/store.js";
-import {
-  editMessage,
-  followupEphemeral,
-  sendMessage,
-  type DiscordActionRow,
-  type DiscordButton,
-} from "./discord.js";
+import { followupEphemeral, sendMessage } from "./discord.js";
+import { markerEmoji, seatEmoji } from "./presentation.js";
+import { openAppoint } from "./stages-appoint.js";
 
 /**
- * Post the per-channel deal-reveal board after `deal(state)` runs.
- * Public message:
+ * Per-channel deal-reveal board. Posted once right after `deal()`
+ * runs; every player taps [查看身份] to receive their role + vision
+ * grid as an ephemeral. The board itself never gets edited — players
+ * can re-tap it mid-game to re-check their info.
  *
- *   身份已分發。
- *   每位玩家請點擊下方 [查看身份] 按鈕，私下查看你的角色與視野。
- *
- * Each click → ephemeral follow-up containing only that player's
- * role card + vision grid. Non-players get a "not in this game"
- * notice. Buttons stay live for the entire session so a player can
- * re-check their role mid-round (a UX upgrade over the DM original).
+ * After posting the reveal board we immediately open the round-1
+ * appoint stage so the leader can pick the first mission roster.
  */
 export async function sendDealBoard(state: GameState): Promise<void> {
   await sendMessage({
@@ -57,8 +46,7 @@ export async function sendDealBoard(state: GameState): Promise<void> {
       },
     ],
   });
-  // TODO (next commit): also post the appoint-mission board here so
-  // the round-1 leader can pick mission members.
+  await openAppoint(state);
 }
 
 /** Ephemeral reveal for whoever clicked the [查看身份] button. */
@@ -118,96 +106,11 @@ export async function handleDealClick(
   return null;
 }
 
-// ── stub handlers for the remaining stages ──────────────────────────────
-// These wire the dispatcher so the component endpoint compiles + the
-// custom_id parser is exercised by Discord. The real logic for each
-// lands in the next commit.
-
-export async function handleAppointClick(
-  ctx: ComponentContext,
-  _tail: string,
-): Promise<ComponentReply> {
-  await stubReply(ctx, "appt");
-  return null;
-}
-
-export async function handlePublicVoteClick(
-  ctx: ComponentContext,
-  _tail: string,
-): Promise<ComponentReply> {
-  await stubReply(ctx, "pub");
-  return null;
-}
-
-export async function handlePrivateVoteClick(
-  ctx: ComponentContext,
-  _tail: string,
-): Promise<ComponentReply> {
-  await stubReply(ctx, "priv");
-  return null;
-}
-
-export async function handleLakeClick(
-  ctx: ComponentContext,
-  _tail: string,
-): Promise<ComponentReply> {
-  await stubReply(ctx, "lake");
-  return null;
-}
-
-export async function handleAssassinateClick(
-  ctx: ComponentContext,
-  _tail: string,
-): Promise<ComponentReply> {
-  await stubReply(ctx, "asn");
-  return null;
-}
-
-async function stubReply(
-  ctx: ComponentContext,
-  stage: string,
-): Promise<void> {
-  await followupEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: `🚧 \`${stage}\` stage not implemented yet.`,
-  });
-}
-
-// ── presentation helpers ────────────────────────────────────────────────
-
-function markerEmoji(marker: VisionMarker): string {
-  switch (marker) {
-    case "self":
-      return "👤";
-    case "red":
-      return "🔴";
-    case "blue":
-      return "🔵";
-    case "purple":
-      return "🟣";
-    case "unknown":
-      return "⬜";
-  }
-}
-
-const SEAT_EMOJI = [
-  "1️⃣",
-  "2️⃣",
-  "3️⃣",
-  "4️⃣",
-  "5️⃣",
-  "6️⃣",
-  "7️⃣",
-  "8️⃣",
-  "9️⃣",
-  "🔟",
-];
-
-function seatEmoji(seat: number): string {
-  return SEAT_EMOJI[seat - 1] ?? `[${seat}]`;
-}
-
-// Helpers exported for future use by stages2.ts (appoint / votes /
-// lake / assassinate). Reuse the seat / marker emoji table from here.
-export { seatEmoji, markerEmoji };
-export type { DiscordActionRow, DiscordButton };
+// Per-stage handlers live in sibling modules so this file stays
+// shallow; re-export them so the dispatcher's switch table is
+// stable.
+export { handleAppointClick } from "./stages-appoint.js";
+export { handlePublicVoteClick } from "./stages-publicvote.js";
+export { handlePrivateVoteClick } from "./stages-privatevote.js";
+export { handleLakeClick } from "./stages-lake.js";
+export { handleAssassinateClick } from "./stages-assassinate.js";

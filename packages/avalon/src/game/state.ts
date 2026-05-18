@@ -33,6 +33,47 @@ export interface Player {
 export type Stage = "lobby" | "playing" | "assassinate" | "ended";
 export type MissionResult = "success" | "fail";
 
+/**
+ * Per-stage transient state. One channel runs one stage at a time, so a
+ * discriminated union keyed by `kind` is cleaner than parallel maps.
+ * Each variant carries the message id of the public board it owns
+ * (so the handler can edit-in-place on every click) plus the
+ * stage-specific tallies. Cleared when the stage advances.
+ */
+export type RuntimeStage =
+  | {
+      kind: "appoint";
+      messageId: string;
+      /** Seat indexes the leader has tapped so far. */
+      selected: number[];
+    }
+  | {
+      kind: "publicVote";
+      messageId: string;
+      /** Mission roster (seat indexes) chosen during appoint. */
+      missionMembers: number[];
+      /** userId → vote. */
+      votes: Record<string, "yes" | "no">;
+    }
+  | {
+      kind: "privateVote";
+      /** The mission roster announcement message. */
+      messageId: string;
+      missionMembers: number[];
+      /** userId → vote. */
+      votes: Record<string, "success" | "fail">;
+    }
+  | {
+      kind: "lake";
+      messageId: string;
+      /** Seat index of the current Lady holder (= state.ladyHolderIndex when stage opens). */
+      holderIndex: number;
+    }
+  | {
+      kind: "assassinate";
+      messageId: string;
+    };
+
 export interface GameState {
   /** Discord guild id. */
   guildId: string;
@@ -41,6 +82,14 @@ export interface GameState {
   /** Whoever ran `/avalon start`. Only they (or admin) can `/avalon stop`. */
   hostUserId: string;
   stage: Stage;
+  /**
+   * Transient stage runtime. Set by the stage opener, mutated by its
+   * click handlers, cleared (or replaced) when the stage advances.
+   * Distinct from `stage` (lobby/playing/assassinate/ended) which is
+   * the high-level lifecycle marker; multiple `current.kind`s fit
+   * inside `stage="playing"`.
+   */
+  current: RuntimeStage | null;
   /** Per-seat player roster. Order is finalised by `deal()`. */
   players: Player[];
   /** Round 1..5 (or 6 once ended). */
@@ -91,6 +140,7 @@ export function newGameState(opts: {
     channelId: opts.channelId,
     hostUserId: opts.hostUserId,
     stage: "lobby",
+    current: null,
     players,
     round: 1,
     consecutiveRejections: 0,
