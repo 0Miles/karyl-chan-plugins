@@ -14,6 +14,7 @@ import { startSignup } from "./flow/signup.js";
 import { onComponent } from "./flow/dispatcher.js";
 import { clearCurrentStageButtons } from "./flow/stop.js";
 import { getGame, removeGame, withChannelLock } from "./game/store.js";
+import { cleanupOrphanArt } from "./art.js";
 import {
   effectiveBase,
   registerWebRoutes,
@@ -187,6 +188,17 @@ export function buildPlugin() {
     ],
     onReady: async (server) => {
       await registerWebRoutes(server, effectiveBase);
+      // One-shot cleanup of orphan art files whose names no longer
+      // match the current schema (notably pre-rename `loyal.<ext>` /
+      // `minion.<ext>` from before the variant slot redesign). Safe
+      // no-op once the volume is clean.
+      const cleaned = await cleanupOrphanArt();
+      if (cleaned.removed.length > 0 || cleaned.errors.length > 0) {
+        server.log.info(
+          { removed: cleaned.removed, errors: cleaned.errors },
+          "avalon: cleaned orphan art files on start",
+        );
+      }
     },
   });
 }

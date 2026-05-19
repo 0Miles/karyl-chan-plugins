@@ -161,6 +161,7 @@ export const zhTW = {
   "role.flavor.mordred": "👑 你是 **莫德雷德** — 連梅林也看不見你，潛伏吧。",
   "role.flavor.oberon": "🦉 你是 **奧伯倫** — 你看不見隊友、隊友也看不見你。獨自破壞任務。",
   "role.flavor.loyal": "💙 你是 **亞瑟的忠臣** — 你看不見任何身份。觀察行為，跟隨梅林的暗示。",
+  "role.flavor.minion": "🗡 你是 **莫德雷德的爪牙** — 你看得見除奧伯倫外的紅方夥伴，與其他紅角合作破壞任務。",
   "faction.arthur": "亞瑟陣營",
   "faction.mordred": "莫德雷德陣營",
 } as const;

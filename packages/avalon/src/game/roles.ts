@@ -16,7 +16,12 @@ export type Position =
   | "morgana"
   | "mordred"
   | "oberon"
-  | "loyal";
+  | "loyal"
+  // Plain Minion of Mordred — present in the role catalog (faction +
+  // vision wired below) so admin-uploaded art slots have somewhere to
+  // attach, but NOT currently included in any `rolesForPlayerCount`
+  // deck. Pre-staged for a future deck variant.
+  | "minion";
 
 export type Faction = "arthur" | "mordred";
 
@@ -51,6 +56,7 @@ export const ROLES: Record<Position, RoleSpec> = {
   },
   oberon: { position: "oberon", faction: "mordred", nameKey: "role.oberon" },
   loyal: { position: "loyal", faction: "arthur", nameKey: "role.loyal" },
+  minion: { position: "minion", faction: "mordred", nameKey: "role.minion" },
 } as const;
 
 /**

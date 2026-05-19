@@ -5,13 +5,34 @@ import {
 } from "@karyl-chan/plugin-sdk";
 import { EMBED_COLOR, PLUGIN_KEY } from "../constants.js";
 import { t } from "../i18n/index.js";
-import { playerByUserId, type GameState } from "../game/state.js";
+import { playerByUserId, type GameState, type Player } from "../game/state.js";
+
+/**
+ * Rank of `viewer` among players sharing the same role, 1-indexed
+ * by ascending seat. Used by `renderDealReveal` to pick a variant
+ * image for `loyal` / `minion` roles where the deck can contain
+ * multiple cards of the same kind.
+ *
+ * Returns 0 if the viewer somehow isn't found in the same-role set
+ * (shouldn't happen in practice — vision is built from the same
+ * `state.players`).
+ */
+export function seatRankAmongSameRole(
+  players: ReadonlyArray<Player>,
+  viewer: Player,
+): number {
+  const sameRole = players
+    .filter((p) => p.position === viewer.position)
+    .sort((a, b) => a.index - b.index);
+  const idx = sameRole.findIndex((p) => p.userId === viewer.userId);
+  return idx === -1 ? 0 : idx + 1;
+}
 import { buildVision } from "../game/vision.js";
 import { getGame } from "../game/store.js";
 import { followupEphemeral, sendMessage } from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
 import { openAppoint } from "./stages-appoint.js";
-import { findArt } from "../art.js";
+import { findArt, findVariantArt, isVariantPosition } from "../art.js";
 import { runtime } from "./runtime.js";
 
 /**
@@ -80,9 +101,21 @@ export async function renderDealReveal(
   // share a generic line. The flavour text repeats the role name so
   // we drop the older `stage.deal.yourRole` line for it.
   const flavorKey = `role.flavor.${viewer.position}` as const;
-  // Look up admin-uploaded art for this position. The URL embeds the
-  // mtime-derived etag so a re-upload busts Discord's CDN cache.
-  const art = await findArt(viewer.position).catch(() => null);
+  // Look up admin-uploaded art for this position. Variant positions
+  // (loyal, minion) pick a variant indexed by the viewer's
+  // seat-rank among same-role players — 1-indexed, ascending seat
+  // order. If the admin uploaded fewer variants than the game has
+  // copies of the role, `findVariantArt` returns null for the
+  // un-ranked seats and we omit the thumbnail (no reuse, by design).
+  //
+  // The URL embeds the mtime-derived etag so a re-upload busts
+  // Discord's CDN cache.
+  const art = isVariantPosition(viewer.position)
+    ? await findVariantArt(
+        viewer.position,
+        seatRankAmongSameRole(state.players, viewer),
+      ).catch(() => null)
+    : await findArt(viewer.position).catch(() => null);
   const thumbnail =
     art != null
       ? { url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}` }

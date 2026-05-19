@@ -23,10 +23,14 @@ import {
   extForMime,
   isSafeArtFilename,
   isValidPosition,
+  isValidVariant,
+  isVariantPosition,
   listArt,
   mimeForArtFile,
   removeArt,
+  removeVariantArt,
   saveArt,
+  saveVariantArt,
 } from "./art.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
@@ -279,6 +283,7 @@ export async function registerWebRoutes(
     return {
       art: entries.map((e) => ({
         position: e.position,
+        ...(e.variant !== undefined ? { variant: e.variant } : {}),
         filename: e.filename,
         size: e.size,
         url: `${getEffectiveBase()}/art/${e.filename}?v=${Math.floor(e.mtimeMs)}`,
@@ -286,6 +291,13 @@ export async function registerWebRoutes(
     };
   });
 
+  /**
+   * Single-image upload for non-variant positions (merlin, percival,
+   * assassin, morgana, mordred, oberon). Variant positions (loyal,
+   * minion) must use the `/:variant` route below; trying this path
+   * for them returns 400 so the WebUI surfaces a clear error
+   * instead of writing a non-conforming filename.
+   */
   server.post<{ Params: { position: string } }>(
     "/api/manage/art/:position",
     async (request, reply) => {
@@ -294,31 +306,14 @@ export async function registerWebRoutes(
       if (!isValidPosition(position)) {
         return reply.code(400).send({ error: "Unknown role" });
       }
-      let file;
-      try {
-        file = await request.file();
-      } catch {
-        return reply.code(400).send({ error: "Expected a multipart upload" });
-      }
-      if (!file) return reply.code(400).send({ error: "No file uploaded" });
-      const ext = extForMime(file.mimetype || "");
-      if (!ext) {
+      if (isVariantPosition(position)) {
         return reply
-          .code(415)
-          .send({ error: "Unsupported image type (use jpeg/png/webp/gif)" });
+          .code(400)
+          .send({ error: "Variant position requires a /:variant slot" });
       }
-      let buf: Buffer;
-      try {
-        buf = await file.toBuffer();
-      } catch {
-        return reply
-          .code(413)
-          .send({ error: `Image too large (max ${MAX_ART_BYTES >> 20} MB)` });
-      }
-      if (buf.length === 0) {
-        return reply.code(400).send({ error: "Empty file" });
-      }
-      const filename = await saveArt(position, buf, ext);
+      const upload = await readUpload(request, reply);
+      if (!upload) return;
+      const filename = await saveArt(position, upload.buf, upload.ext);
       return {
         position,
         filename,
@@ -335,11 +330,112 @@ export async function registerWebRoutes(
       if (!isValidPosition(position)) {
         return reply.code(400).send({ error: "Unknown role" });
       }
+      if (isVariantPosition(position)) {
+        return reply
+          .code(400)
+          .send({ error: "Variant position requires a /:variant slot" });
+      }
       const removed = await removeArt(position);
       if (!removed) return reply.code(404).send({ error: "No artwork stored" });
       return { ok: true };
     },
   );
+
+  /**
+   * Variant-slot upload (loyal, minion). The slot number is the
+   * 1-indexed variant index — at deal-reveal time the engine matches
+   * the player's seat-rank-among-same-role to this index.
+   */
+  server.post<{ Params: { position: string; variant: string } }>(
+    "/api/manage/art/:position/:variant",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const position = request.params.position;
+      if (!isValidPosition(position) || !isVariantPosition(position)) {
+        return reply.code(400).send({ error: "Unknown variant role" });
+      }
+      const variant = Number(request.params.variant);
+      if (!isValidVariant(position, variant)) {
+        return reply.code(400).send({ error: "Variant out of range" });
+      }
+      const upload = await readUpload(request, reply);
+      if (!upload) return;
+      const filename = await saveVariantArt(
+        position,
+        variant,
+        upload.buf,
+        upload.ext,
+      );
+      return {
+        position,
+        variant,
+        filename,
+        url: `${getEffectiveBase()}/art/${filename}?v=${Date.now()}`,
+      };
+    },
+  );
+
+  server.delete<{ Params: { position: string; variant: string } }>(
+    "/api/manage/art/:position/:variant",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const position = request.params.position;
+      if (!isValidPosition(position) || !isVariantPosition(position)) {
+        return reply.code(400).send({ error: "Unknown variant role" });
+      }
+      const variant = Number(request.params.variant);
+      if (!isValidVariant(position, variant)) {
+        return reply.code(400).send({ error: "Variant out of range" });
+      }
+      const removed = await removeVariantArt(position, variant);
+      if (!removed) {
+        return reply.code(404).send({ error: "No artwork stored for this slot" });
+      }
+      return { ok: true };
+    },
+  );
+
+  /**
+   * Shared multipart-read prelude for both the single and variant
+   * upload routes. Returns null when it already sent a 4xx response.
+   */
+  async function readUpload(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<{ buf: Buffer; ext: string } | null> {
+    let file;
+    try {
+      file = await request.file();
+    } catch {
+      reply.code(400).send({ error: "Expected a multipart upload" });
+      return null;
+    }
+    if (!file) {
+      reply.code(400).send({ error: "No file uploaded" });
+      return null;
+    }
+    const ext = extForMime(file.mimetype || "");
+    if (!ext) {
+      reply
+        .code(415)
+        .send({ error: "Unsupported image type (use jpeg/png/webp/gif)" });
+      return null;
+    }
+    let buf: Buffer;
+    try {
+      buf = await file.toBuffer();
+    } catch {
+      reply
+        .code(413)
+        .send({ error: `Image too large (max ${MAX_ART_BYTES >> 20} MB)` });
+      return null;
+    }
+    if (buf.length === 0) {
+      reply.code(400).send({ error: "Empty file" });
+      return null;
+    }
+    return { buf, ext };
+  }
 
   // Public serve — no auth. Discord fetches the URL anonymously when
   // rendering the role-reveal embed's thumbnail, and the WebUI fetches

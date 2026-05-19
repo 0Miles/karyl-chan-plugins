@@ -3,6 +3,9 @@ import {
   extForMime,
   isSafeArtFilename,
   isValidPosition,
+  isValidVariant,
+  isVariantPosition,
+  maxVariantsForPosition,
   mimeForArtFile,
 } from "../art.js";
 
@@ -27,7 +30,9 @@ describe("art-002: extForMime rejects others", () => {
   );
 });
 
-describe("art-003: isValidPosition allows exactly the 7 game positions", () => {
+describe("art-003: isValidPosition allows the 8 game positions (incl. minion)", () => {
+  // `minion` was added to support the future Minion-of-Mordred art slot
+  // even though no current `rolesForPlayerCount` deck includes it.
   it.each([
     "merlin",
     "percival",
@@ -36,6 +41,7 @@ describe("art-003: isValidPosition allows exactly the 7 game positions", () => {
     "mordred",
     "oberon",
     "loyal",
+    "minion",
   ])("isValidPosition(%s) is true", (p) => {
     expect(isValidPosition(p)).toBe(true);
   });
@@ -59,18 +65,76 @@ describe("art-004: isSafeArtFilename blocks traversal and unwanted shapes", () =
     expect(isSafeArtFilename("merlin")).toBe(false);
     expect(isSafeArtFilename(".jpg")).toBe(false);
   });
-  it("accepts simple lower-case <name>.<ext>", () => {
+  it("accepts single-image positions only", () => {
     expect(isSafeArtFilename("merlin.jpg")).toBe(true);
+    expect(isSafeArtFilename("percival.jpg")).toBe(true);
     expect(isSafeArtFilename("morgana.png")).toBe(true);
-    expect(isSafeArtFilename("morgana.webp")).toBe(true);
-    expect(isSafeArtFilename("morgana.gif")).toBe(true);
-    expect(isSafeArtFilename("merlin.jpeg")).toBe(true);
+    expect(isSafeArtFilename("assassin.webp")).toBe(true);
+    expect(isSafeArtFilename("mordred.gif")).toBe(true);
+    expect(isSafeArtFilename("oberon.jpeg")).toBe(true);
+  });
+  it("REJECTS the legacy single-file shape for variant positions", () => {
+    // loyal.<ext> / minion.<ext> were valid before the variant
+    // redesign; cleanupOrphanArt sweeps them at start, but the
+    // filename guard also has to refuse them so they can't sneak
+    // into listArt() / GET /art/<file> if they appear on disk.
+    expect(isSafeArtFilename("loyal.png")).toBe(false);
+    expect(isSafeArtFilename("minion.png")).toBe(false);
+  });
+  it("accepts variant filenames inside each role's range", () => {
+    for (let i = 1; i <= 5; i++) {
+      expect(isSafeArtFilename(`loyal-${i}.png`)).toBe(true);
+    }
+    for (let i = 1; i <= 3; i++) {
+      expect(isSafeArtFilename(`minion-${i}.png`)).toBe(true);
+    }
+  });
+  it("rejects variant filenames outside the configured range", () => {
+    expect(isSafeArtFilename("loyal-0.png")).toBe(false);
+    expect(isSafeArtFilename("loyal-6.png")).toBe(false);
+    expect(isSafeArtFilename("minion-4.png")).toBe(false);
+    expect(isSafeArtFilename("minion-0.png")).toBe(false);
+  });
+  it("rejects variant filenames for non-variant positions", () => {
+    expect(isSafeArtFilename("merlin-1.png")).toBe(false);
+    expect(isSafeArtFilename("assassin-2.png")).toBe(false);
   });
   it("regex is case-insensitive on extension only", () => {
-    // Comment in art.ts says /i — current behaviour accepts JPG/JPEG.
-    // This pins the behaviour so if someone tightens the regex later
-    // we know about it.
     expect(isSafeArtFilename("merlin.JPG")).toBe(true);
+    expect(isSafeArtFilename("loyal-1.JPG")).toBe(true);
+  });
+});
+
+describe("variant positions metadata", () => {
+  it("isVariantPosition flags loyal + minion only", () => {
+    expect(isVariantPosition("loyal")).toBe(true);
+    expect(isVariantPosition("minion")).toBe(true);
+    expect(isVariantPosition("merlin")).toBe(false);
+    expect(isVariantPosition("percival")).toBe(false);
+    expect(isVariantPosition("assassin")).toBe(false);
+    expect(isVariantPosition("morgana")).toBe(false);
+    expect(isVariantPosition("mordred")).toBe(false);
+    expect(isVariantPosition("oberon")).toBe(false);
+  });
+  it("maxVariantsForPosition is 5 / 3 / 0", () => {
+    expect(maxVariantsForPosition("loyal")).toBe(5);
+    expect(maxVariantsForPosition("minion")).toBe(3);
+    expect(maxVariantsForPosition("merlin")).toBe(0);
+  });
+  it("isValidVariant clamps to 1..max", () => {
+    expect(isValidVariant("loyal", 0)).toBe(false);
+    expect(isValidVariant("loyal", 1)).toBe(true);
+    expect(isValidVariant("loyal", 5)).toBe(true);
+    expect(isValidVariant("loyal", 6)).toBe(false);
+    expect(isValidVariant("minion", 1)).toBe(true);
+    expect(isValidVariant("minion", 3)).toBe(true);
+    expect(isValidVariant("minion", 4)).toBe(false);
+    expect(isValidVariant("merlin", 1)).toBe(false);
+  });
+  it("isValidVariant rejects non-integer", () => {
+    expect(isValidVariant("loyal", 1.5)).toBe(false);
+    expect(isValidVariant("loyal", Number.NaN)).toBe(false);
+    expect(isValidVariant("loyal", Number.POSITIVE_INFINITY)).toBe(false);
   });
 });
 
