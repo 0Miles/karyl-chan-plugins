@@ -457,13 +457,25 @@ Auth model:
 
 ### Slash command
 
-`/avalon` (guild-scoped). Subcommands:
+`/avalon` is registered through the **`avalon` guild feature** (軌一)
+— bot admins enable it per guild via the admin UI; the slash command
+only appears in guilds that have the feature on. Off by default
+(`enabledByDefault: false`). Mirrors how the radio plugin gates
+`/radio`.
+
+Subcommands:
 - `start` → `signup.startSignup`. Refuses if channel already has signup or game.
 - `stop`  → host or admin only; calls `removeGame(channelId)`. Does NOT
   delete the active stage's public board (the message lingers with broken
   buttons; clicks now show `error.notRunning` ephemeral).
 - `manage` → mints a 15-min plugin-session JWT and returns an ephemeral
   message with a Link button to `<effectiveBase>/?token=<JWT>`.
+
+The component (button) handlers are registered at plugin level (軌二)
+not under the feature, so a guild that disables the feature mid-game
+still gets its in-flight buttons handled cleanly until the game ends
+or someone runs `/avalon stop` (in a guild where the feature is
+still on).
 
 ## Persistent state
 

@@ -1,5 +1,6 @@
 import {
   componentCustomId,
+  defineGuildFeature,
   definePlugin,
   definePluginCommand,
   definePluginComponent,
@@ -36,10 +37,18 @@ function linkButtonRow(label: string, url: string): unknown {
 /**
  * Build the karyl-avalon plugin instance.
  *
- * Single slash command `/avalon` with subcommands `start` / `stop` —
- * matches the Python original's one-command surface. All in-game
- * interaction is button clicks (component handlers), routed through
- * the dispatcher in `flow/dispatcher.ts`.
+ * `/avalon` is a **guild feature** (軌一) — bot admins enable it per
+ * guild via the admin UI. When enabled, Discord registers the slash
+ * command on that guild's command list with subcommands
+ * `start` / `stop` / `manage`. Off by default; mirrors how the radio
+ * plugin gates its `/radio` command.
+ *
+ * All in-game interaction is button clicks (component handlers),
+ * routed through the dispatcher in `flow/dispatcher.ts`. Components
+ * remain plugin-level (軌二) so a guild that's currently
+ * mid-game keeps responding to clicks even if an admin happens to
+ * disable the feature mid-session — the command stops surfacing but
+ * the in-flight game stays clickable until it ends.
  */
 export function buildPlugin() {
   return definePlugin({
@@ -59,88 +68,97 @@ export function buildPlugin() {
       // The admin WebUI requires this to mint plugin-session JWTs.
       "auth.session",
     ],
-    pluginCommands: [
-      definePluginCommand({
-        name: "avalon",
-        description: t(undefined, "command.avalon.description"),
-        scope: "guild",
-        integrationTypes: ["guild_install"],
-        contexts: ["Guild"],
-        options: [
-          {
-            type: "sub_command",
-            name: "start",
-            description: t(undefined, "command.avalon.start.description"),
-          },
-          {
-            type: "sub_command",
-            name: "stop",
-            description: t(undefined, "command.avalon.stop.description"),
-          },
-          {
-            type: "sub_command",
-            name: "manage",
-            description: t(undefined, "command.avalon.manage.description"),
-          },
-        ],
-        handler: async (ctx: CommandContext): Promise<CommandReply> => {
-          const guildId = ctx.guildId;
-          const channelId = ctx.channelId;
-          if (!guildId || !channelId) {
-            return t(undefined, "error.notInGuild");
-          }
-          const sub = ctx.subCommandName;
-          if (sub === "stop") {
-            return withChannelLock(channelId, async () => {
-              const existing = getGame(channelId);
-              if (!existing) return t(undefined, "error.notRunning");
-              if (
-                existing.hostUserId !== ctx.userId &&
-                !ctx.hasCapability?.("admin")
-              ) {
-                return t(undefined, "error.notHostCannotStop");
+    guildFeatures: [
+      defineGuildFeature({
+        key: "avalon",
+        name: "Avalon",
+        description:
+          "阿瓦隆桌遊：透過共用按鈕進行的多人桌遊。啟用後此 guild 多出 /avalon 指令；對局狀態存記憶體、跨重啟會掉。預設關閉，逐 guild 啟用。",
+        enabledByDefault: false,
+        commands: [
+          definePluginCommand({
+            name: "avalon",
+            description: t(undefined, "command.avalon.description"),
+            scope: "guild",
+            integrationTypes: ["guild_install"],
+            contexts: ["Guild"],
+            options: [
+              {
+                type: "sub_command",
+                name: "start",
+                description: t(undefined, "command.avalon.start.description"),
+              },
+              {
+                type: "sub_command",
+                name: "stop",
+                description: t(undefined, "command.avalon.stop.description"),
+              },
+              {
+                type: "sub_command",
+                name: "manage",
+                description: t(undefined, "command.avalon.manage.description"),
+              },
+            ],
+            handler: async (ctx: CommandContext): Promise<CommandReply> => {
+              const guildId = ctx.guildId;
+              const channelId = ctx.channelId;
+              if (!guildId || !channelId) {
+                return t(undefined, "error.notInGuild");
               }
-              // B-002: strip live-looking buttons from the active stage
-              // board so the channel's scrollback doesn't keep clickable
-              // remnants of the just-stopped game.
-              await clearCurrentStageButtons(existing);
-              removeGame(channelId);
-              return t(undefined, "error.stopped");
-            });
-          }
-          if (sub === "manage") {
-            // 15-min bot JWT — only used to bootstrap a plugin-side
-            // manage session (access + refresh) on first load.
-            const res = (await ctx.botRpc("/api/plugin/auth.session", {
-              user_id: ctx.userId,
-              kind: "manage",
-            })) as { allowed?: boolean; token?: string } | null;
-            if (res === null) {
-              return {
-                content: `⚠ ${t(undefined, "manage.botRejected")}`,
-                ephemeral: true,
-              };
-            }
-            if (res.allowed !== true || typeof res.token !== "string") {
-              return {
-                content: `⚠ ${t(undefined, "manage.notAllowed")}`,
-                ephemeral: true,
-              };
-            }
-            return {
-              content: `🔧 **${t(undefined, "manage.title")}**\n${t(undefined, "manage.description")}`,
-              components: [
-                linkButtonRow(
-                  `🔧 ${t(undefined, "manage.openButton")}`,
-                  `${effectiveBase()}/?token=${res.token}`,
-                ),
-              ],
-              ephemeral: true,
-            };
-          }
-          // Default: start.
-          return startSignup(ctx, guildId, channelId);
-        },
+              const sub = ctx.subCommandName;
+              if (sub === "stop") {
+                return withChannelLock(channelId, async () => {
+                  const existing = getGame(channelId);
+                  if (!existing) return t(undefined, "error.notRunning");
+                  if (
+                    existing.hostUserId !== ctx.userId &&
+                    !ctx.hasCapability?.("admin")
+                  ) {
+                    return t(undefined, "error.notHostCannotStop");
+                  }
+                  // B-002: strip live-looking buttons from the active stage
+                  // board so the channel's scrollback doesn't keep clickable
+                  // remnants of the just-stopped game.
+                  await clearCurrentStageButtons(existing);
+                  removeGame(channelId);
+                  return t(undefined, "error.stopped");
+                });
+              }
+              if (sub === "manage") {
+                // 15-min bot JWT — only used to bootstrap a plugin-side
+                // manage session (access + refresh) on first load.
+                const res = (await ctx.botRpc("/api/plugin/auth.session", {
+                  user_id: ctx.userId,
+                  kind: "manage",
+                })) as { allowed?: boolean; token?: string } | null;
+                if (res === null) {
+                  return {
+                    content: `⚠ ${t(undefined, "manage.botRejected")}`,
+                    ephemeral: true,
+                  };
+                }
+                if (res.allowed !== true || typeof res.token !== "string") {
+                  return {
+                    content: `⚠ ${t(undefined, "manage.notAllowed")}`,
+                    ephemeral: true,
+                  };
+                }
+                return {
+                  content: `🔧 **${t(undefined, "manage.title")}**\n${t(undefined, "manage.description")}`,
+                  components: [
+                    linkButtonRow(
+                      `🔧 ${t(undefined, "manage.openButton")}`,
+                      `${effectiveBase()}/?token=${res.token}`,
+                    ),
+                  ],
+                  ephemeral: true,
+                };
+              }
+              // Default: start.
+              return startSignup(ctx, guildId, channelId);
+            },
+          }),
+        ],
       }),
     ],
     components: [
