@@ -122,3 +122,133 @@ describe("flow-029: deal-board click from a non-player triggers notInGame epheme
     expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
   });
 });
+
+describe("flow-040: deal reveal ephemeral carries the role-help button", () => {
+  it("seated player click → followup body has a components row with deal:help", async () => {
+    const game = buildGame({
+      positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
+      channelId: "c-deal-help-1",
+    });
+    void game;
+    harness.resetCalls();
+    await click({ channelId: "c-deal-help-1", userId: "u0", componentId: "deal" });
+    const followups = harness.callsTo("interactions.followup");
+    expect(followups.length).toBeGreaterThan(0);
+    const body = followups[followups.length - 1].body as {
+      components?: Array<{ components: Array<{ custom_id?: string }> }>;
+    };
+    expect(body.components).toBeTruthy();
+    const ids = (body.components ?? []).flatMap((row) =>
+      row.components.map((c) => c.custom_id ?? ""),
+    );
+    expect(ids).toContain("kc:karyl-avalon:deal:help");
+  });
+});
+
+describe("flow-041: deal:help renders a role-description embed", () => {
+  it("merlin viewer's help ephemeral includes the merlin description + red marker line", async () => {
+    const game = buildGame({
+      positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
+      channelId: "c-deal-help-2",
+    });
+    void game;
+    harness.resetCalls();
+    await click({
+      channelId: "c-deal-help-2",
+      userId: "u0",
+      componentId: "deal",
+      tail: "help",
+    });
+    const followups = harness.callsTo("interactions.followup");
+    expect(followups.length).toBe(1);
+    const body = followups[0].body as {
+      embeds?: Array<{
+        title?: string;
+        description?: string;
+        fields?: Array<{ name: string; value: string }>;
+      }>;
+    };
+    const embed = body.embeds?.[0];
+    expect(embed).toBeTruthy();
+    expect(embed!.title).toContain("角色說明");
+    expect(embed!.title).toContain("梅林");
+    expect(embed!.description).toContain("梅林");
+    // Merlin sees red (with the Mordred-invisible caveat) — assert the
+    // red marker section is present.
+    const markerField = embed!.fields?.find((f) =>
+      f.name.includes("視野標記"),
+    );
+    expect(markerField).toBeTruthy();
+    expect(markerField!.value).toContain("🔴");
+    expect(markerField!.value).toContain("莫德雷德");
+  });
+  it("percival viewer's help ephemeral includes the purple marker line", async () => {
+    const game = buildGame({
+      positions: ["merlin", "percival", "assassin", "morgana", "loyal", "loyal"],
+      channelId: "c-deal-help-3",
+    });
+    void game;
+    harness.resetCalls();
+    await click({
+      channelId: "c-deal-help-3",
+      userId: "u1", // percival
+      componentId: "deal",
+      tail: "help",
+    });
+    const body = harness
+      .callsTo("interactions.followup")[0]
+      .body as {
+        embeds?: Array<{ fields?: Array<{ value: string }> }>;
+      };
+    const markerLines = body.embeds?.[0]?.fields?.[0]?.value ?? "";
+    expect(markerLines).toContain("🟣");
+    expect(markerLines).toContain("梅林或莫甘娜");
+  });
+  it("loyal viewer's help ephemeral has self + unknown markers ONLY", async () => {
+    const game = buildGame({
+      positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
+      channelId: "c-deal-help-4",
+    });
+    void game;
+    harness.resetCalls();
+    await click({
+      channelId: "c-deal-help-4",
+      userId: "u3", // loyal
+      componentId: "deal",
+      tail: "help",
+    });
+    const body = harness
+      .callsTo("interactions.followup")[0]
+      .body as {
+        embeds?: Array<{ fields?: Array<{ value: string }> }>;
+      };
+    const markerLines = body.embeds?.[0]?.fields?.[0]?.value ?? "";
+    expect(markerLines).toContain("👤");
+    expect(markerLines).toContain("⬜");
+    expect(markerLines).not.toContain("🔴");
+    expect(markerLines).not.toContain("🟣");
+  });
+  it("non-player help click → notInGame ephemeral", async () => {
+    const game = buildGame({
+      positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
+      channelId: "c-deal-help-5",
+    });
+    void game;
+    harness.resetCalls();
+    await click({
+      channelId: "c-deal-help-5",
+      userId: "stranger",
+      componentId: "deal",
+      tail: "help",
+    });
+    const followups = harness.callsTo("interactions.followup");
+    expect(followups.length).toBe(1);
+    // Notice ephemeral has `content`, not `embeds`.
+    const body = followups[0].body as {
+      content?: string;
+      embeds?: unknown[];
+    };
+    expect(body.content).toBeTruthy();
+    expect(body.embeds).toBeUndefined();
+  });
+});

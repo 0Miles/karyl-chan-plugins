@@ -6,9 +6,14 @@ import {
 import { EMBED_COLOR, PLUGIN_KEY } from "../constants.js";
 import { t } from "../i18n/index.js";
 import { playerByUserId, type GameState, type Player } from "../game/state.js";
+import { ROLES, type Position } from "../game/roles.js";
 import { buildVision } from "../game/vision.js";
 import { getGame } from "../game/store.js";
-import { followupEphemeral, sendMessage } from "./discord.js";
+import {
+  followupEphemeral,
+  sendMessage,
+  type DiscordActionRow,
+} from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
 import { openAppoint } from "./stages-appoint.js";
 import { findArt, findVariantArt, isVariantPosition } from "../art.js";
@@ -150,6 +155,7 @@ export async function renderDealReveal(
 
 export async function handleDealClick(
   ctx: ComponentContext,
+  tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game) {
@@ -159,6 +165,26 @@ export async function handleDealClick(
     });
     return null;
   }
+  const viewer = playerByUserId(game, ctx.userId);
+  if (!viewer) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.deal.notInGame"),
+    });
+    return null;
+  }
+  // tail === "help" — secondary ephemeral: a deeper role explanation
+  // + the marker legend the viewer actually sees. Fired by the
+  // "查看角色說明" button on the identity ephemeral.
+  if (tail === "help") {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      embeds: [renderRoleHelp(viewer)],
+    });
+    return null;
+  }
+  // Default tail — render the identity ephemeral with the
+  // "查看角色說明" follow-up button so the viewer can drill in.
   const reveal = await renderDealReveal(game, ctx.userId);
   if (!reveal) {
     await followupEphemeral({
@@ -170,8 +196,88 @@ export async function handleDealClick(
   await followupEphemeral({
     interactionToken: ctx.interactionToken,
     embeds: [reveal],
+    components: dealRevealComponents(),
   });
   return null;
+}
+
+/**
+ * Single-row action with one button that fires `deal:help` — the
+ * viewer's secondary "角色說明" ephemeral. The deal-reveal main
+ * ephemeral always carries this row so a player can re-open the help
+ * at any time (and the row is per-viewer ephemeral, so it can't be
+ * triggered by anyone else).
+ */
+function dealRevealComponents(): DiscordActionRow[] {
+  return [
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 2,
+          custom_id: componentCustomId(PLUGIN_KEY, "deal", "help"),
+          label: t(undefined, "stage.deal.helpButton"),
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Build the "查看角色說明" ephemeral: a per-role description plus the
+ * vision markers that role actually sees. Mirrors the per-role
+ * `role.description.*` and the `markerLegendLines` derivation so the
+ * Percival player sees the 🟣 line but a loyal doesn't.
+ */
+export function renderRoleHelp(viewer: Player): {
+  color: number;
+  title: string;
+  description: string;
+  fields: Array<{ name: string; value: string; inline?: boolean }>;
+} {
+  const roleName = t(undefined, ROLES[viewer.position].nameKey);
+  const descKey = `role.description.${viewer.position}` as const;
+  return {
+    color: EMBED_COLOR,
+    title: t(undefined, "stage.deal.helpTitle", { role: roleName }),
+    description: t(undefined, descKey),
+    fields: [
+      {
+        name: t(undefined, "stage.deal.markerSection"),
+        value: markerLegendLines(viewer.position).join("\n"),
+        inline: false,
+      },
+    ],
+  };
+}
+
+/**
+ * Per-role marker legend — only includes the markers a viewer of
+ * `position` could actually see on the deal-reveal grid. Loyal /
+ * Oberon get just self + unknown; Merlin gets the red explanation
+ * (with the Mordred-invisible caveat); Percival gets purple; the
+ * non-Oberon evil get red (with the Oberon-invisible caveat). Every
+ * legend ends with the unknown marker for completeness.
+ */
+function markerLegendLines(position: Position): string[] {
+  const lines: string[] = [
+    `${markerEmoji("self")} ${t(undefined, "marker.self")}`,
+  ];
+  if (position === "merlin") {
+    lines.push(`${markerEmoji("red")} ${t(undefined, "marker.merlinRed")}`);
+  } else if (position === "percival") {
+    lines.push(`${markerEmoji("purple")} ${t(undefined, "marker.percivalPurple")}`);
+  } else if (
+    position === "assassin" ||
+    position === "morgana" ||
+    position === "mordred" ||
+    position === "minion"
+  ) {
+    lines.push(`${markerEmoji("red")} ${t(undefined, "marker.evilRed")}`);
+  }
+  lines.push(`${markerEmoji("unknown")} ${t(undefined, "marker.unknown")}`);
+  return lines;
 }
 
 // Per-stage handlers live in sibling modules so this file stays

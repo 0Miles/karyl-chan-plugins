@@ -44,7 +44,7 @@ export async function onComponent(
         case "sig":
           return handleSignupClick(ctx, ctx.tail as SignupAction);
         case "deal":
-          return handleDealClick(ctx);
+          return handleDealClick(ctx, ctx.tail);
         case "appt":
           return handleAppointClick(ctx, ctx.tail);
         case "pub":
