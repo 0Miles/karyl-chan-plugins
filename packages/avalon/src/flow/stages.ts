@@ -6,6 +6,13 @@ import {
 import { EMBED_COLOR, PLUGIN_KEY } from "../constants.js";
 import { t } from "../i18n/index.js";
 import { playerByUserId, type GameState, type Player } from "../game/state.js";
+import { buildVision } from "../game/vision.js";
+import { getGame } from "../game/store.js";
+import { followupEphemeral, sendMessage } from "./discord.js";
+import { markerEmoji, seatEmoji } from "./presentation.js";
+import { openAppoint } from "./stages-appoint.js";
+import { findArt, findVariantArt, isVariantPosition } from "../art.js";
+import { runtime } from "./runtime.js";
 
 /**
  * Rank of `viewer` among players sharing the same role, 1-indexed
@@ -27,13 +34,6 @@ export function seatRankAmongSameRole(
   const idx = sameRole.findIndex((p) => p.userId === viewer.userId);
   return idx === -1 ? 0 : idx + 1;
 }
-import { buildVision } from "../game/vision.js";
-import { getGame } from "../game/store.js";
-import { followupEphemeral, sendMessage } from "./discord.js";
-import { markerEmoji, seatEmoji } from "./presentation.js";
-import { openAppoint } from "./stages-appoint.js";
-import { findArt, findVariantArt, isVariantPosition } from "../art.js";
-import { runtime } from "./runtime.js";
 
 /**
  * Per-channel deal-reveal board. Posted once right after `deal()`
@@ -110,12 +110,25 @@ export async function renderDealReveal(
   //
   // The URL embeds the mtime-derived etag so a re-upload busts
   // Discord's CDN cache.
-  const art = isVariantPosition(viewer.position)
-    ? await findVariantArt(
-        viewer.position,
-        seatRankAmongSameRole(state.players, viewer),
-      ).catch(() => null)
-    : await findArt(viewer.position).catch(() => null);
+  let art: { filename: string; etag: string } | null;
+  if (isVariantPosition(viewer.position)) {
+    const rank = seatRankAmongSameRole(state.players, viewer);
+    if (rank === 0) {
+      // Should never reach here in practice — vision is built from
+      // the same state.players that this lookup walks. If it does,
+      // we get no thumbnail (variant 0 isn't a valid slot). Log so
+      // ops can spot the regression rather than chase a silent
+      // missing-art bug.
+      runtime().log.warn("avalon: seat-rank lookup failed for variant role", {
+        channelId: state.channelId,
+        viewerUserId: viewer.userId,
+        position: viewer.position,
+      });
+    }
+    art = await findVariantArt(viewer.position, rank).catch(() => null);
+  } else {
+    art = await findArt(viewer.position).catch(() => null);
+  }
   const thumbnail =
     art != null
       ? { url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}` }

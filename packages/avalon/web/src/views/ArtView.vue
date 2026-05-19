@@ -12,14 +12,18 @@ const { error: toastError } = useToast();
 
 interface CropTarget {
   position: RolePosition;
+  /** undefined for single-image roles; 1..variantCount otherwise. */
   variant?: number;
   file: File;
 }
 const cropTarget = ref<CropTarget | null>(null);
 const cropVisible = ref(false);
 
-function validateAndOpenCrop(target: CropTarget): void {
-  const { file } = target;
+function onTileUpload(
+  position: RolePosition,
+  variant: number | undefined,
+  file: File,
+): void {
   if (file.size > 5 * 1024 * 1024) {
     toastError(`圖檔超過 5 MB（${(file.size / 1024 / 1024).toFixed(1)} MB）`);
     return;
@@ -28,20 +32,8 @@ function validateAndOpenCrop(target: CropTarget): void {
     toastError("僅支援 JPEG / PNG / WebP / GIF");
     return;
   }
-  cropTarget.value = target;
+  cropTarget.value = { position, variant, file };
   cropVisible.value = true;
-}
-
-function onSingleUpload(position: RolePosition, file: File): void {
-  validateAndOpenCrop({ position, file });
-}
-
-function onVariantUpload(
-  position: RolePosition,
-  variant: number,
-  file: File,
-): void {
-  validateAndOpenCrop({ position, variant, file });
 }
 
 async function onCropConfirm(blob: Blob): Promise<void> {
@@ -63,6 +55,21 @@ function cropTargetLabel(): string {
   return variant === undefined
     ? labelOf(position)
     : `${labelOf(position)} #${variant}`;
+}
+
+/**
+ * Render-friendly slot list for one role: a single `[undefined]` entry
+ * for single-image roles, `[1, 2, …, N]` for variant roles. Keeps the
+ * template a single v-for loop and removes the variant/non-variant
+ * fork in the original implementation.
+ */
+function slotSequence(variantCount: number | undefined): Array<number | undefined> {
+  if (!variantCount) return [undefined];
+  return Array.from({ length: variantCount }, (_, i) => i + 1);
+}
+
+function tileLabel(roleLabel: string, variant: number | undefined): string {
+  return variant === undefined ? roleLabel : `${roleLabel} #${variant}`;
 }
 
 onMounted(refreshArt);
@@ -95,30 +102,17 @@ void art;
         </p>
       </div>
 
-      <div
-        v-if="role.variantCount"
-        class="art-grid"
-      >
+      <div class="art-grid" :class="{ single: !role.variantCount }">
         <RoleArtTile
-          v-for="v in role.variantCount"
-          :key="v"
+          v-for="variant in slotSequence(role.variantCount)"
+          :key="variant ?? 'single'"
           :position="role.position"
-          :label="`${role.label} #${v}`"
+          :label="tileLabel(role.label, variant)"
           :faction="role.faction"
-          :entry="entryFor(role.position, v)"
-          :variant="v"
-          @upload="(file) => onVariantUpload(role.position, v, file)"
-          @delete="deleteArt(role.position, { variant: v })"
-        />
-      </div>
-      <div v-else class="art-grid single">
-        <RoleArtTile
-          :position="role.position"
-          :label="role.label"
-          :faction="role.faction"
-          :entry="entryFor(role.position)"
-          @upload="(file) => onSingleUpload(role.position, file)"
-          @delete="deleteArt(role.position)"
+          :entry="entryFor(role.position, variant)"
+          :variant="variant"
+          @upload="(file) => onTileUpload(role.position, variant, file)"
+          @delete="deleteArt(role.position, { variant })"
         />
       </div>
     </section>
