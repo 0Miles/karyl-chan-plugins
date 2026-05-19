@@ -235,6 +235,14 @@ async function handleLeaveClick(
   // The host can leave the roster but the session stays under their
   // control — they still own the start / cancel buttons.
   signup.players.delete(ctx.userId);
+  // Lady-of-the-Lake is only legal at 7+. If we drop below the
+  // threshold after a leave, force the toggle back to false so a
+  // later re-join doesn't silently inherit a stale `true` for a
+  // freshly-composed roster (H-1: the host hasn't re-confirmed
+  // their intent for the new player mix).
+  if (signup.players.size < LADY_MIN_PLAYERS) {
+    signup.ladyEnabled = false;
+  }
   await refreshSignupMessage(signup.channelId);
   await followupEphemeral({
     interactionToken: ctx.interactionToken,

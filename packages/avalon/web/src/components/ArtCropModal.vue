@@ -157,7 +157,7 @@ function onClose(): void {
 <template>
   <AppModal
     :visible="visible"
-    :title="`裁切角色圖像 — ${positionLabel}`"
+    :title="`裁切圖像 — ${positionLabel}`"
     width="min(640px, 95vw)"
     @close="onClose"
   >

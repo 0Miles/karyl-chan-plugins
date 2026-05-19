@@ -192,4 +192,46 @@ describe("B-003: lady-of-the-lake toggle on signup", () => {
     // No board repaint for a rejected click.
     expect(harness.callsTo("messages.edit").length).toBe(0);
   });
+  it("leaving below 7 players forces ladyEnabled back to false", async () => {
+    // H-1: stale-true UX guard. 7p → toggle on → one leaves (n=6 →
+    // button hidden) → another joins (n=7 again → button reappears).
+    // After the leave step, ladyEnabled must be false; otherwise the
+    // restored button silently shows "已啟用" for a freshly-composed
+    // roster the host hasn't re-confirmed.
+    await buildSignupWith(7);
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u0",
+        componentId: "sig",
+        tail: "lady",
+      }),
+      "lady",
+    );
+    // u6 leaves
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u6",
+        componentId: "sig",
+        tail: "leave",
+      }),
+      "leave",
+    );
+    // Re-toggle on at 6 should still be rejected (under threshold).
+    harness.resetCalls();
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u0",
+        componentId: "sig",
+        tail: "lady",
+      }),
+      "lady",
+    );
+    // ephemeral fires (ladyNeeds7); board NOT repainted (lady state
+    // didn't flip — was already false after the auto-reset).
+    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("messages.edit").length).toBe(0);
+  });
 });
