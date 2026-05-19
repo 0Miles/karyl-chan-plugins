@@ -71,7 +71,7 @@ export function buildPlugin() {
     guildFeatures: [
       defineGuildFeature({
         key: "avalon",
-        name: "Avalon",
+        name: "Karyl Avalon",
         description:
           "阿瓦隆桌遊：透過共用按鈕進行的多人桌遊。啟用後此 guild 多出 /avalon 指令；對局狀態存記憶體、跨重啟會掉。預設關閉，逐 guild 啟用。",
         enabledByDefault: false,

@@ -4,7 +4,7 @@
  * (`plugin:karyl-avalon:...`), and the bot-side service name.
  */
 export const PLUGIN_KEY = "karyl-avalon";
-export const PLUGIN_NAME = "Avalon";
+export const PLUGIN_NAME = "Karyl Avalon";
 export const PLUGIN_VERSION = "0.1.0";
 
 /** Embed accent — Avalon's classic green from the Python original. */

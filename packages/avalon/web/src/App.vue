@@ -14,7 +14,7 @@ onMounted(bootstrap);
 <template>
   <div class="app-wrap">
     <header class="app-header">
-      <h1>Avalon — Admin</h1>
+      <h1>Karyl Avalon — Admin</h1>
       <span class="sub">karyl-avalon</span>
     </header>
 
