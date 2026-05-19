@@ -115,6 +115,10 @@ Test surfaces:
 | flow-030 | dispatcher rejects clicks for non-current stage                   | game in `publicVote`; click `appt:s:0`                                 | ephemeral `error.notRunning`; state unchanged                            | `stages-appoint.ts:60-67`         |
 | flow-031 | dispatcher catches thrown handler error and ephemeral-nudges      | force a handler to throw                                               | dispatcher's catch logs error + sends ephemeral; game state untouched   | `dispatcher.ts:66-76`             |
 | flow-032 | per-channel lock serialises clicks                                | spam 10 simultaneous `pub:y` from 10 different players                 | all votes recorded; no votes lost; transition fires exactly once        | `dispatcher.ts:42-65`, `store.ts:43-58` |
+| rank-001 | seatRankAmongSameRole 1-indexes by ascending seat                  | players at seats [0,1,2,3,4] with loyals at 1,3,4                      | ranks 1, 2, 3 for those loyals                                          | `seat-rank.test.ts` |
+| rank-002 | single-of-its-kind viewer is rank 1                                | merlin alone of its position                                            | rank = 1                                                                | `seat-rank.test.ts` |
+| rank-003 | returns 0 when viewer not in same-role set (error path)            | phantom viewer not in `players`                                         | rank = 0 (caller logs warn + skips thumbnail)                           | `seat-rank.test.ts`, `stages.ts` |
+| rank-004 | ranks by seat-index field, not array order                         | array shuffled so order ≠ seat order                                    | rank matches `.index` ascending                                          | `seat-rank.test.ts` |
 
 ### E. Signup edge cases
 
@@ -146,11 +150,23 @@ Test surfaces:
 |--------|----------------------------------------------------------|----------------------------------------------------------------------|------------------------------------------------|-------------------|
 | art-001 | extForMime accepts the 4 documented mime types          | `extForMime("image/jpeg")` etc.                                       | "jpg" / "png" / "webp" / "gif"                  | `art.ts:49-51`    |
 | art-002 | extForMime rejects others                                | `extForMime("image/svg+xml")`                                         | null                                            | `art.ts:49-51`    |
-| art-003 | isValidPosition allows exactly 7 positions               | each `Position`                                                       | true                                            | `art.ts:31-47`    |
+| art-003 | isValidPosition allows the 8 positions (incl. minion)    | each `Position` including `minion`                                    | true                                            | `art.ts:31-47`    |
 | art-004 | isSafeArtFilename blocks traversal & garbage             | `../foo`, `merlin.svg`, `..jpg`, `merlin.JPG`                          | first three false; "merlin.JPG" true (re is /i) | `art.ts:58-67`    |
 | art-005 | saveArt + listArt + findArt round-trip                   | write to a `tmpdir/art`; saveArt("merlin", buf, "png"); listArt        | one entry; findArt returns it with stable etag  | `art.ts:91-186`   |
 | art-006 | saveArt deletes any previous extension for same position | save merlin.jpg then merlin.png to same tmpdir                         | only merlin.png remains                         | `art.ts:78-101`   |
 | art-007 | removeArt is best-effort and reports                     | removeArt with nothing on disk                                         | returns false                                   | `art.ts:103-115`  |
+| art-008 | saveVariantArt + listArt variant round-trip              | save loyal-1 + loyal-2; listArt                                        | 2 entries with variants [1,2]                   | `art-fs.test.ts`  |
+| art-009 | saveVariantArt replaces prior extension for same slot    | save loyal-1.jpg then loyal-1.png                                      | only loyal-1.png remains                        | `art-fs.test.ts`  |
+| art-010 | saveVariantArt rejects out-of-range variant              | save loyal variant 6 / merlin variant 1                                 | throws `/out of range/`                         | `art-fs.test.ts`  |
+| art-011 | findArt returns null for variant positions               | upload loyal-1; findArt("loyal")                                       | null                                            | `art-fs.test.ts`  |
+| art-012 | findVariantArt returns null when rank not uploaded        | upload loyal-1; findVariantArt("loyal", 2)                              | null (no thumbnail; never reuses a variant)     | `art-fs.test.ts`  |
+| art-013 | findVariantArt returns matching filename + stable etag    | upload loyal-3; findVariantArt("loyal", 3)                              | `{filename: "loyal-3.png", etag: /^[a-f0-9]{8}$/}` | `art-fs.test.ts`  |
+| art-014 | cleanupOrphanArt sweeps legacy loyal/minion + junk        | plant loyal.png + minion.jpg + stray.txt on disk; call cleanup          | removed ⊇ those 3; legitimate merlin.png remains | `art-fs.test.ts`  |
+| art-015 | cleanupOrphanArt is no-op on a clean dir                  | saveArt + saveVariantArt + cleanup                                      | `{removed: [], errors: []}`                     | `art-fs.test.ts`  |
+| art-016 | listArt sorts by position then variant ascending          | insert out-of-order; listArt                                            | `[loyal-1, loyal-2, merlin, minion-1, minion-3]` | `art-fs.test.ts`  |
+| art-017 | isVariantPosition flags loyal + minion only               | isVariantPosition for each Position                                     | true for loyal/minion; false for others         | `art.test.ts`     |
+| art-018 | maxVariantsForPosition returns 5 / 3 / 0                  | maxVariantsForPosition("loyal" / "minion" / "merlin")                   | 5 / 3 / 0                                       | `art.test.ts`     |
+| art-019 | isValidVariant clamps to 1..max + rejects non-integer     | various boundaries + NaN / Infinity / 1.5                               | true only for ints in 1..max for variant role   | `art.test.ts`     |
 
 ### H. Web routes (`web-routes.ts`) — integration via fastify.inject
 
@@ -169,6 +185,11 @@ Test surfaces:
 | web-011 | manage force-stop removes a game by channel              | POST `/api/manage/games/:channelId/stop`             | game gone; 200                                        | `web-routes.ts:245-266`|
 | web-012 | manage refresh rotates token pair                        | POST `/api/manage/refresh` with valid refresh        | new access+refresh; old refresh still valid until exp | `web-routes.ts:206-230`|
 | web-013 | SPA root serves HTML with publicBaseUrl basePath injected | GET `/` with getEffectiveBase having a non-/ path    | response body contains `__PLUGIN_BASE__ = "<path>"`   | `web-routes.ts:384-414`|
+| web-014 | variant upload accepted for loyal / minion                | POST `/api/manage/art/loyal/1` multipart png         | 200 with `{ position, variant, filename, url }`        | `web-routes.ts:349-376` |
+| web-015 | variant upload rejected for single-image position         | POST `/api/manage/art/merlin/1`                       | 400 "Unknown variant role"                              | `web-routes.ts:354-360` |
+| web-016 | variant out-of-range rejected                              | POST `/api/manage/art/loyal/6`                        | 400 "Variant out of range"                              | `web-routes.ts:362-365` |
+| web-017 | variant delete happy path                                  | upload loyal-1; DELETE `/api/manage/art/loyal/1`     | 200 `{ ok: true }`; file gone                           | `web-routes.ts:378-397` |
+| web-018 | variant delete 404 when slot empty                         | DELETE `/api/manage/art/loyal/2` with nothing there  | 404 "No artwork stored for this slot"                   | `web-routes.ts:393-395` |
 
 ### I. Persistence & restart
 

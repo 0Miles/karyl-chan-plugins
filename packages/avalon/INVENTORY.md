@@ -359,6 +359,29 @@ After assassinate: `settleAssassinate` returns
   - `merlin-killed`  → mordred wins
   - `merlin-survived` → arthur wins.
 
+### Role art slot model
+
+The `art.ts` storage splits roles into two flavours:
+
+- **Single-image positions** — `merlin`, `percival`, `assassin`,
+  `morgana`, `mordred`, `oberon`. Exactly one file per role,
+  `<position>.<ext>`.
+- **Variant positions** — `loyal` (max 5 slots) and `minion` (max
+  3 slots). Each slot is a separately uploaded file named
+  `<position>-<variant>.<ext>` where variant ∈ 1..N. At
+  `renderDealReveal` time, the engine computes the viewer's
+  *seat-rank-among-same-role* (1-indexed, ascending seat index) and
+  pulls the matching variant via `findVariantArt`. If the admin
+  hasn't uploaded the variant for that rank, the embed omits the
+  thumbnail (never reused — see B/A discussion below).
+
+`Position` includes `minion` so the art slots have somewhere to
+attach, but `rolesForPlayerCount` doesn't currently put `minion`
+in any deck — the slots are pre-staged for a future deck variant.
+The plugin's `onReady` runs `cleanupOrphanArt` to sweep any
+pre-rename `loyal.<ext>` / `minion.<ext>` files left from before
+the variant redesign.
+
 ### Divergences from rulebook
 
 - **n=4 dead-on-arrival**: rulebook says 5–10 only; this codebase pretends
@@ -409,8 +432,10 @@ Auth chain:
 - `GET  /api/manage/games`         — admin list of active games + signups
 - `POST /api/manage/games/:channelId/stop` — admin force-stop
 - `GET  /api/manage/art`           — list uploaded art with cache-busting URLs
-- `POST /api/manage/art/:position` — multipart upload (5 MB cap, 4 mime types)
-- `DELETE /api/manage/art/:position` — remove art file(s)
+- `POST /api/manage/art/:position` — multipart upload for single-image positions (merlin/percival/assassin/morgana/mordred/oberon); 5 MB cap, 4 mime types. Variant positions (loyal/minion) get 400 here.
+- `DELETE /api/manage/art/:position` — remove single-image art file(s). Variant positions get 400 here.
+- `POST /api/manage/art/:position/:variant` — multipart upload for variant slots; `:variant` is 1-indexed (loyal 1..5, minion 1..3). 5 MB cap, 4 mime types.
+- `DELETE /api/manage/art/:position/:variant` — remove a specific variant slot.
 
 Auth model:
 - `auth()`: bot-issued plugin-session JWT (Ed25519, 15 min); required for
@@ -469,10 +494,13 @@ So on container restart:
   TypeScript-checked. The only way to land an unknown key at runtime is
   to feed a dynamically-built string via `as const`. The current dynamic
   case is `` `role.flavor.${viewer.position}` as const `` in
-  `stages.ts:82` — that resolves to one of 7 keys, all present in zhTW.
+  `stages.ts` — that resolves to one of 8 keys (after `minion` was
+  added alongside the variant-art slots), all present in zhTW. Note
+  `minion` is not currently dealt by any `rolesForPlayerCount` config,
+  so `role.flavor.minion` is exercised only by upcoming deck variants.
 - TESTPLAN "i18n 兩種語系不爆 missing key" is therefore really
   "verify every literal `t()` key has a value in zhTW + verify the
-  `role.flavor.${position}` template has all 7 keys present". A second
+  `role.flavor.${position}` template has all 8 keys present". A second
   language doesn't exist yet.
 
 ## Known UX/behavioural quirks (not bugs per se — but worth seeing)
