@@ -19,15 +19,19 @@ import {
 let harness: InstalledHarness;
 
 /**
- * Tick the microtask queue so the synchronous-path NPC scheduler
- * (queueMicrotask in driver.ts when delay=0) drains. Used between
- * stage transitions so consecutive NPC turns can fully resolve before
- * the test asserts on the resulting state.
+ * Drain the microtask queue (queueMicrotask scheduling in the NPC
+ * driver) AND yield to the event loop so libuv I/O callbacks fire —
+ * needed because `endGame` does a real `readdir` via the art store
+ * when computing the MVP card image, and microtask-only draining
+ * leaves that pending.
  */
 async function drainMicrotasks(): Promise<void> {
-  // A few await points are needed because each NPC tick re-schedules
-  // another microtask for the next one until the stage advances.
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 50; i++) {
+    await Promise.resolve();
+  }
+  // Yield to the I/O phase so any pending fs callbacks resolve.
+  await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 50; i++) {
     await Promise.resolve();
   }
 }
