@@ -13,9 +13,15 @@ import {
   setGame,
   withChannelLock,
 } from "../game/store.js";
-import { deal, newGameState, type GameState } from "../game/state.js";
+import {
+  NPC_USERID_PREFIX,
+  deal,
+  newGameState,
+  type GameState,
+} from "../game/state.js";
 import { editMessage, followupEphemeral, sendMessage } from "./discord.js";
 import { renderDealReveal, sendDealBoard } from "./stages.js";
+import { sampleNpcDisplayNames } from "../npc/names.js";
 
 /**
  * Per-channel sign-up scratch state. Held alongside the GameState
@@ -33,6 +39,15 @@ interface Signup {
   hostDisplayName: string;
   messageId: string;
   players: Map<string, string>; // userId → displayName, insertion-ordered
+  /**
+   * Synthetic NPC players pre-seated at signup time so a small group
+   * can fill a 5+ table. Stored as `[userId, displayName]` pairs,
+   * insertion-ordered, with `userId` always prefixed `npc:` (see
+   * `state.NPC_USERID_PREFIX`). The size is bounded by
+   * MIN_PLAYERS/MAX_PLAYERS together with `players.size` (a total
+   * roster of 5–10).
+   */
+  npcs: Array<{ userId: string; displayName: string }>;
   /**
    * Host-toggled at signup time via the `sig:lady` button. Surfaces in
    * the UI only when player count ≥ LADY_MIN_PLAYERS (Avalon rulebook
@@ -65,7 +80,14 @@ const MAX_PLAYERS = 10;
  */
 const LADY_MIN_PLAYERS = 7;
 
-export type SignupAction = "join" | "leave" | "start" | "cancel" | "lady";
+export type SignupAction =
+  | "join"
+  | "leave"
+  | "start"
+  | "cancel"
+  | "lady"
+  | "npc+"
+  | "npc-";
 
 /**
  * Entry point from the `/avalon start` slash. Posts the public sign-up
@@ -76,20 +98,43 @@ export async function startSignup(
   ctx: CommandContext,
   guildId: string,
   channelId: string,
+  opts: { npcCount?: number } = {},
 ): Promise<CommandReply> {
   return withChannelLock(channelId, async () => {
     if (getGame(channelId) || signups.has(channelId)) {
       return t(undefined, "error.alreadyRunning");
     }
     const hostMention = `<@${ctx.userId}>`;
-    // Initial board: empty roster, no lady toggle (under 7 players).
+    // Cap the upfront NPC count so a single user can't spawn 50 seats
+    // — the engine's MAX_PLAYERS clamps the roster total anyway, but
+    // here we trim early so we don't allocate names we'll never use.
+    const requestedNpcs = Math.max(
+      0,
+      Math.min(opts.npcCount ?? 0, MAX_PLAYERS - 1),
+    );
+    const initialNpcs = sampleNpcDisplayNames(
+      requestedNpcs,
+      new Set([ctx.userDisplayName]),
+    ).map((displayName, i) => ({
+      userId: `${NPC_USERID_PREFIX}${i}`,
+      displayName,
+    }));
+    // Initial board: host + seeded NPCs in the roster.
     const sent = await sendMessage({
       channelId,
-      embeds: [renderSignupEmbed(hostMention, [])],
-      components: signupComponents({
-        canStart: false,
+      embeds: [renderSignupEmbed(hostMention, [ctx.userDisplayName], {
+        npcNames: initialNpcs.map((n) => n.displayName),
         showLady: false,
         ladyEnabled: false,
+      })],
+      components: signupComponents({
+        canStart:
+          1 + initialNpcs.length >= MIN_PLAYERS &&
+          1 + initialNpcs.length <= MAX_PLAYERS,
+        showLady: false,
+        ladyEnabled: false,
+        canAddNpc: 1 + initialNpcs.length < MAX_PLAYERS,
+        canRemoveNpc: initialNpcs.length > 0,
       }),
     });
     if (!sent) {
@@ -102,10 +147,9 @@ export async function startSignup(
       hostDisplayName: ctx.userDisplayName,
       messageId: sent.id,
       players: new Map([[ctx.userId, ctx.userDisplayName]]),
+      npcs: initialNpcs,
       ladyEnabled: false,
     });
-    // Immediately repaint so the host shows up in the roster.
-    await refreshSignupMessage(channelId);
     return {
       embeds: [
         {
@@ -154,9 +198,87 @@ export async function handleSignupClick(
       return handleCancelClick(ctx, signup);
     case "lady":
       return handleLadyClick(ctx, signup);
+    case "npc+":
+      return handleNpcAddClick(ctx, signup);
+    case "npc-":
+      return handleNpcRemoveClick(ctx, signup);
     default:
       return null;
   }
+}
+
+/**
+ * Host-only NPC roster controls. Mirrors the sig:lady pattern: host
+ * gate first, capacity gate next, mutate then repaint. Total roster
+ * (humans + NPCs) is bounded by MAX_PLAYERS = 10.
+ */
+async function handleNpcAddClick(
+  ctx: ComponentContext,
+  signup: Signup,
+): Promise<ComponentReply> {
+  if (ctx.userId !== signup.hostUserId) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.signup.onlyHost"),
+    });
+    return null;
+  }
+  if (signup.players.size + signup.npcs.length >= MAX_PLAYERS) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.signup.npcAtMax"),
+    });
+    return null;
+  }
+  const taken = new Set<string>([
+    ...signup.players.values(),
+    ...signup.npcs.map((n) => n.displayName),
+  ]);
+  const [name] = sampleNpcDisplayNames(1, taken);
+  const newIndex = signup.npcs.length;
+  signup.npcs.push({
+    userId: `${NPC_USERID_PREFIX}${newIndex}`,
+    displayName: name,
+  });
+  await refreshSignupMessage(signup.channelId);
+  await followupEphemeral({
+    interactionToken: ctx.interactionToken,
+    content: t(undefined, "stage.signup.npcAdded", { name }),
+  });
+  return null;
+}
+
+async function handleNpcRemoveClick(
+  ctx: ComponentContext,
+  signup: Signup,
+): Promise<ComponentReply> {
+  if (ctx.userId !== signup.hostUserId) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.signup.onlyHost"),
+    });
+    return null;
+  }
+  if (signup.npcs.length === 0) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.signup.npcAtMin"),
+    });
+    return null;
+  }
+  signup.npcs.pop();
+  // Mirror handleLeaveClick: if the roster drops below the lady
+  // threshold, clear the toggle so a re-add doesn't silently inherit
+  // a stale `true` for a freshly-composed roster.
+  if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
+    signup.ladyEnabled = false;
+  }
+  await refreshSignupMessage(signup.channelId);
+  await followupEphemeral({
+    interactionToken: ctx.interactionToken,
+    content: t(undefined, "stage.signup.npcRemoved"),
+  });
+  return null;
 }
 
 /**
@@ -176,7 +298,7 @@ async function handleLadyClick(
     });
     return null;
   }
-  if (signup.players.size < LADY_MIN_PLAYERS) {
+  if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
     await followupEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.ladyNeeds7"),
@@ -205,18 +327,31 @@ async function handleJoinClick(
     });
     return null;
   }
-  if (signup.players.size >= MAX_PLAYERS) {
-    await followupEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.tooMany"),
-    });
-    return null;
+  let evictedNpc = false;
+  if (signup.players.size + signup.npcs.length >= MAX_PLAYERS) {
+    // A human joining at cap evicts the last-seeded NPC so
+    // /avalon start npc:9 doesn't render the roster unjoinable for
+    // every other human. Communicate the eviction to the joiner so
+    // the count change doesn't look like a phantom seat.
+    if (signup.npcs.length > 0) {
+      signup.npcs.pop();
+      evictedNpc = true;
+    } else {
+      await followupEphemeral({
+        interactionToken: ctx.interactionToken,
+        content: t(undefined, "stage.signup.tooMany"),
+      });
+      return null;
+    }
   }
   signup.players.set(ctx.userId, ctx.userDisplayName);
   await refreshSignupMessage(signup.channelId);
   await followupEphemeral({
     interactionToken: ctx.interactionToken,
-    content: t(undefined, "stage.signup.joined"),
+    content: t(
+      undefined,
+      evictedNpc ? "stage.signup.joinedEvictedNpc" : "stage.signup.joined",
+    ),
   });
   return null;
 }
@@ -240,7 +375,7 @@ async function handleLeaveClick(
   // later re-join doesn't silently inherit a stale `true` for a
   // freshly-composed roster (H-1: the host hasn't re-confirmed
   // their intent for the new player mix).
-  if (signup.players.size < LADY_MIN_PLAYERS) {
+  if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
     signup.ladyEnabled = false;
   }
   await refreshSignupMessage(signup.channelId);
@@ -262,7 +397,8 @@ async function handleStartClick(
     });
     return null;
   }
-  if (signup.players.size < MIN_PLAYERS) {
+  const totalSize = signup.players.size + signup.npcs.length;
+  if (totalSize < MIN_PLAYERS) {
     await followupEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.notEnough"),
@@ -275,15 +411,20 @@ async function handleStartClick(
   // the threshold forces back to false so we don't ship a dead flag
   // into the GameState.
   const effectiveLady =
-    signup.ladyEnabled && signup.players.size >= LADY_MIN_PLAYERS;
+    signup.ladyEnabled && totalSize >= LADY_MIN_PLAYERS;
   const game = newGameState({
     guildId: signup.guildId,
     channelId: signup.channelId,
     hostUserId: signup.hostUserId,
-    signups: [...signup.players.entries()].map(([userId, displayName]) => ({
-      userId,
-      displayName,
-    })),
+    // Humans first, then NPCs — `deal()` reshuffles before assigning
+    // positions, so insertion order doesn't bias role distribution.
+    signups: [
+      ...[...signup.players.entries()].map(([userId, displayName]) => ({
+        userId,
+        displayName,
+      })),
+      ...signup.npcs,
+    ],
     ladyEnabled: effectiveLady,
   });
   deal(game);
@@ -341,18 +482,31 @@ async function handleCancelClick(
 function renderSignupEmbed(
   hostMention: string,
   names: string[],
-  opts: { showLady: boolean; ladyEnabled: boolean } = {
+  opts: {
+    showLady: boolean;
+    ladyEnabled: boolean;
+    npcNames?: string[];
+  } = {
     showLady: false,
     ladyEnabled: false,
   },
 ) {
+  const npcNames = opts.npcNames ?? [];
+  const total = names.length + npcNames.length;
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
     {
       name: t(undefined, "stage.signup.fieldCount"),
-      value: String(names.length),
+      value: String(total),
       inline: true,
     },
   ];
+  if (npcNames.length > 0) {
+    fields.push({
+      name: t(undefined, "stage.signup.fieldNpcCount"),
+      value: String(npcNames.length),
+      inline: true,
+    });
+  }
   if (opts.showLady) {
     fields.push({
       name: t(undefined, "stage.signup.fieldLady"),
@@ -369,6 +523,14 @@ function renderSignupEmbed(
       inline: false,
     });
   }
+  if (npcNames.length > 0) {
+    const suffix = t(undefined, "stage.signup.npcLineSuffix");
+    fields.push({
+      name: t(undefined, "stage.signup.fieldNpcRoster"),
+      value: npcNames.map((n) => `\`${n}\`${suffix}`).join("\n"),
+      inline: false,
+    });
+  }
   return {
     title: t(undefined, "stage.signup.title"),
     description: t(undefined, "stage.signup.content", { host: hostMention }),
@@ -381,8 +543,10 @@ function signupComponents(opts: {
   canStart: boolean;
   showLady: boolean;
   ladyEnabled: boolean;
+  canAddNpc: boolean;
+  canRemoveNpc: boolean;
 }) {
-  const row = [
+  const row1 = [
     {
       type: 2 as const,
       style: 3 as const,
@@ -414,7 +578,7 @@ function signupComponents(opts: {
   // Green when active, grey when off — mirrors the radio plugin's
   // loop-mode toggle convention.
   if (opts.showLady) {
-    row.push({
+    row1.push({
       type: 2 as const,
       style: opts.ladyEnabled ? (3 as const) : (2 as const),
       custom_id: componentCustomId(PLUGIN_KEY, "sig", "lady"),
@@ -423,15 +587,44 @@ function signupComponents(opts: {
         : t(undefined, "stage.signup.ladyButtonOff"),
     });
   }
-  return [{ type: 1 as const, components: row }];
+  // NPC +/− on their own row so the primary controls stay in row 1.
+  // Discord allows up to 5 action rows per message; signup uses 2.
+  const row2: Array<{
+    type: 2;
+    style: 1 | 2 | 3 | 4 | 5;
+    custom_id: string;
+    label: string;
+    disabled?: boolean;
+  }> = [
+    {
+      type: 2 as const,
+      style: 2 as const,
+      custom_id: componentCustomId(PLUGIN_KEY, "sig", "npc+"),
+      label: t(undefined, "stage.signup.npcAdd"),
+      disabled: !opts.canAddNpc,
+    },
+    {
+      type: 2 as const,
+      style: 2 as const,
+      custom_id: componentCustomId(PLUGIN_KEY, "sig", "npc-"),
+      label: t(undefined, "stage.signup.npcRemove"),
+      disabled: !opts.canRemoveNpc,
+    },
+  ];
+  return [
+    { type: 1 as const, components: row1 },
+    { type: 1 as const, components: row2 },
+  ];
 }
 
 async function refreshSignupMessage(channelId: string): Promise<void> {
   const signup = signups.get(channelId);
   if (!signup) return;
   const names = [...signup.players.values()];
+  const npcNames = signup.npcs.map((n) => n.displayName);
+  const total = names.length + npcNames.length;
   const hostMention = `<@${signup.hostUserId}>`;
-  const showLady = signup.players.size >= LADY_MIN_PLAYERS;
+  const showLady = total >= LADY_MIN_PLAYERS;
   await editMessage({
     channelId,
     messageId: signup.messageId,
@@ -439,14 +632,15 @@ async function refreshSignupMessage(channelId: string): Promise<void> {
       renderSignupEmbed(hostMention, names, {
         showLady,
         ladyEnabled: signup.ladyEnabled,
+        npcNames,
       }),
     ],
     components: signupComponents({
-      canStart:
-        signup.players.size >= MIN_PLAYERS &&
-        signup.players.size <= MAX_PLAYERS,
+      canStart: total >= MIN_PLAYERS && total <= MAX_PLAYERS,
       showLady,
       ladyEnabled: signup.ladyEnabled,
+      canAddNpc: total < MAX_PLAYERS,
+      canRemoveNpc: signup.npcs.length > 0,
     }),
   });
 }

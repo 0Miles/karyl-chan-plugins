@@ -16,6 +16,7 @@ import { onComponent } from "./flow/dispatcher.js";
 import { clearCurrentStageButtons } from "./flow/stop.js";
 import { getGame, removeGame, withChannelLock } from "./game/store.js";
 import { cleanupOrphanArt } from "./art.js";
+import { clearNpcTimer } from "./npc/driver.js";
 import {
   effectiveBase,
   registerWebRoutes,
@@ -87,6 +88,17 @@ export function buildPlugin() {
                 type: "sub_command",
                 name: "start",
                 description: t(undefined, "command.avalon.start.description"),
+                options: [
+                  {
+                    type: "integer",
+                    name: "npc",
+                    description: t(
+                      undefined,
+                      "command.avalon.start.npcOption",
+                    ),
+                    required: false,
+                  },
+                ],
               },
               {
                 type: "sub_command",
@@ -120,6 +132,7 @@ export function buildPlugin() {
                   // board so the channel's scrollback doesn't keep clickable
                   // remnants of the just-stopped game.
                   await clearCurrentStageButtons(existing);
+                  clearNpcTimer(channelId);
                   removeGame(channelId);
                   return t(undefined, "error.stopped");
                 });
@@ -154,8 +167,16 @@ export function buildPlugin() {
                   ephemeral: true,
                 };
               }
-              // Default: start.
-              return startSignup(ctx, guildId, channelId);
+              // Default: start. Optional `npc` integer adds synthetic
+              // players to the roster at signup time so a small group
+              // can fill out a 5+ table without recruiting more
+              // humans.
+              const rawNpc = ctx.options.npc;
+              const npcCount =
+                typeof rawNpc === "number" && Number.isFinite(rawNpc)
+                  ? Math.floor(rawNpc)
+                  : 0;
+              return startSignup(ctx, guildId, channelId, { npcCount });
             },
           }),
         ],
