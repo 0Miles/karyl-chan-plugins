@@ -122,13 +122,84 @@ export async function followupEphemeral(opts: {
   content?: string;
   embeds?: DiscordEmbed[];
   components?: Components;
+}): Promise<{ id: string | null } | null> {
+  const res = (await runtime().botRpc(
+    "/api/plugin/interactions.followup",
+    {
+      interaction_token: opts.interactionToken,
+      content: opts.content,
+      embeds: opts.embeds,
+      components: opts.components,
+      ephemeral: true,
+    },
+  )) as { ok?: boolean; id?: string | null } | null;
+  if (res === null) return null;
+  return { id: res.id ?? null };
+}
+
+/**
+ * Delete a follow-up message previously created via
+ * `followupEphemeral`. Required because `messages.delete` doesn't
+ * work on ephemeral followups — Discord routes their lifecycle
+ * through the interaction's webhook instead. Used by `toastEphemeral`
+ * to auto-dismiss short-lived nudges.
+ */
+export async function deleteEphemeralFollowup(opts: {
+  interactionToken: string;
+  messageId: string;
 }): Promise<boolean> {
-  const res = await runtime().botRpc("/api/plugin/interactions.followup", {
-    interaction_token: opts.interactionToken,
+  const res = await runtime().botRpc(
+    "/api/plugin/interactions.delete_followup",
+    {
+      interaction_token: opts.interactionToken,
+      message_id: opts.messageId,
+    },
+  );
+  return res !== null;
+}
+
+/**
+ * Default lifetime for an ephemeral "toast" — short feedback nudges
+ * like "已記錄你的投票" or "只有此輪隊長可以指派". Long enough to
+ * read, short enough that the chat doesn't pile up with stale
+ * notifications. 2 s matches the standard Material toast cadence.
+ */
+const DEFAULT_TOAST_TTL_MS = 2000;
+
+/**
+ * Send an ephemeral followup and schedule its deletion after
+ * `ttlMs`. Use this for transient feedback — anything informational
+ * the user needs to ack but won't refer back to (vote-recorded
+ * confirmations, "not your turn" rejections, "already voted"
+ * warnings). For content the user MIGHT want to re-read (role card
+ * reveal, lake check result, role help), use `followupEphemeral`
+ * directly so it stays visible until they dismiss it manually.
+ *
+ * The delete is fire-and-forget: a failure is logged (delete throws
+ * on already-deleted or interaction-token-expired) but never
+ * surfaced to the caller.
+ */
+export function toastEphemeral(opts: {
+  interactionToken: string;
+  content?: string;
+  embeds?: DiscordEmbed[];
+  ttlMs?: number;
+}): Promise<{ id: string | null } | null> {
+  const ttl = opts.ttlMs ?? DEFAULT_TOAST_TTL_MS;
+  return followupEphemeral({
+    interactionToken: opts.interactionToken,
     content: opts.content,
     embeds: opts.embeds,
-    components: opts.components,
-    ephemeral: true,
+  }).then((sent) => {
+    if (sent?.id) {
+      const handle = setTimeout(() => {
+        void deleteEphemeralFollowup({
+          interactionToken: opts.interactionToken,
+          messageId: sent.id!,
+        });
+      }, ttl);
+      if (typeof handle.unref === "function") handle.unref();
+    }
+    return sent;
   });
-  return res !== null;
 }

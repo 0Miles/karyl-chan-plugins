@@ -22,12 +22,13 @@ import {
   editMessage,
   followupEphemeral,
   sendMessage,
+  toastEphemeral,
   type DiscordActionRow,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
 import { openLake, lakeIsDueAfterRound } from "./stages-lake.js";
 import { openAssassinate } from "./stages-assassinate.js";
-import { missionProgressLine } from "./presentation.js";
+import { missionProgressLine, viewCardButtonRow } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 import { scheduleNpcStep } from "../npc/driver.js";
@@ -81,7 +82,7 @@ export async function handlePrivateVoteClick(
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game || game.current?.kind !== "privateVote") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -103,14 +104,14 @@ async function handlePrivateOpen(
   if (game.current?.kind !== "privateVote") return null;
   const me = playerByUserId(game, ctx.userId);
   if (!me || !game.current.missionMembers.includes(me.index)) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.privateVote.notMember"),
     });
     return null;
   }
   if (game.current.votes[ctx.userId]) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.privateVote.alreadyVoted"),
     });
@@ -151,14 +152,14 @@ async function handlePrivateBallot(
   if (game.current?.kind !== "privateVote") return null;
   const me = playerByUserId(game, ctx.userId);
   if (!me || !game.current.missionMembers.includes(me.index)) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.privateVote.notMember"),
     });
     return null;
   }
   if (game.current.votes[ctx.userId]) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.privateVote.alreadyVoted"),
     });
@@ -168,14 +169,14 @@ async function handlePrivateBallot(
   // *visually*; reject a fail vote from a non-evil player at the
   // engine boundary too.
   if (ballot === "fail" && factionOf(me) === "arthur") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.privateVote.evilOnly"),
     });
     return null;
   }
   game.current.votes[ctx.userId] = ballot;
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content:
       ballot === "success"
@@ -348,5 +349,6 @@ export function privateVoteComponents(): DiscordActionRow[] {
         },
       ],
     },
+    viewCardButtonRow(),
   ];
 }

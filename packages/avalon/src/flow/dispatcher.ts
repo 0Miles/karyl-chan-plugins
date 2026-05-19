@@ -1,6 +1,6 @@
 import type { ComponentContext, ComponentReply } from "@karyl-chan/plugin-sdk";
 import { withChannelLock } from "../game/store.js";
-import { followupEphemeral } from "./discord.js";
+import { toastEphemeral } from "./discord.js";
 import { runtime } from "./runtime.js";
 import {
   handleSignupClick,
@@ -80,7 +80,7 @@ async function safeEphemeral(
   ctx: ComponentContext,
   content: string,
 ): Promise<void> {
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content,
   }).catch(() => {});

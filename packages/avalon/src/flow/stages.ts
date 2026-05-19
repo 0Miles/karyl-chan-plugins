@@ -12,6 +12,7 @@ import { getGame } from "../game/store.js";
 import {
   followupEphemeral,
   sendMessage,
+  toastEphemeral,
   type DiscordActionRow,
 } from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
@@ -163,7 +164,7 @@ export async function handleDealClick(
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -171,7 +172,7 @@ export async function handleDealClick(
   }
   const viewer = playerByUserId(game, ctx.userId);
   if (!viewer) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.deal.notInGame"),
     });
@@ -191,7 +192,7 @@ export async function handleDealClick(
   // "查看角色說明" follow-up button so the viewer can drill in.
   const reveal = await renderDealReveal(game, ctx.userId);
   if (!reveal) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.deal.notInGame"),
     });
@@ -212,7 +213,7 @@ export async function handleDealClick(
  * at any time (and the row is per-viewer ephemeral, so it can't be
  * triggered by anyone else).
  */
-function dealRevealComponents(): DiscordActionRow[] {
+export function dealRevealComponents(): DiscordActionRow[] {
   return [
     {
       type: 1,

@@ -15,12 +15,12 @@ import { getGame } from "../game/store.js";
 import { ROLES } from "../game/roles.js";
 import {
   editMessage,
-  followupEphemeral,
+  toastEphemeral,
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
 } from "./discord.js";
-import { truncate } from "./presentation.js";
+import { truncate, viewCardButtonRow } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 import { scheduleNpcStep } from "../npc/driver.js";
@@ -72,7 +72,7 @@ export async function handleAssassinateClick(
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game || game.current?.kind !== "assassinate") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -80,7 +80,7 @@ export async function handleAssassinateClick(
   }
   const me = playerByUserId(game, ctx.userId);
   if (!me || me.position !== "assassin") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.assassinate.notAssassin"),
     });
@@ -90,7 +90,7 @@ export async function handleAssassinateClick(
   const target = playerByIndex(game, seat);
   if (!target) return null;
   if (target.userId === me.userId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.assassinate.cannotSelf"),
     });
@@ -148,5 +148,6 @@ function assassinateComponents(state: GameState): DiscordActionRow[] {
   for (let i = 0; i < buttons.length; i += 5) {
     rows.push({ type: 1, components: buttons.slice(i, i + 5) });
   }
+  rows.push(viewCardButtonRow());
   return rows;
 }

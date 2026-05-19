@@ -14,6 +14,11 @@ import { t } from "./i18n/index.js";
 import { startSignup } from "./flow/signup.js";
 import { onComponent } from "./flow/dispatcher.js";
 import { clearCurrentStageButtons } from "./flow/stop.js";
+import {
+  dealRevealComponents,
+  renderDealReveal,
+} from "./flow/stages.js";
+import { playerByUserId } from "./game/state.js";
 import { getGame, removeGame, withChannelLock } from "./game/store.js";
 import { cleanupOrphanArt } from "./art.js";
 import { clearNpcTimer } from "./npc/driver.js";
@@ -66,6 +71,10 @@ export function buildPlugin() {
       "messages.delete",
       "interactions.respond",
       "interactions.followup",
+      // Auto-dismisses toast ephemerals (vote-recorded nudges, "not
+      // your turn" rejections, etc.) after a short TTL —
+      // messages.delete doesn't work on ephemeral followups.
+      "interactions.delete_followup",
       // The admin WebUI requires this to mint plugin-session JWTs.
       "auth.session",
     ],
@@ -107,6 +116,11 @@ export function buildPlugin() {
               },
               {
                 type: "sub_command",
+                name: "card",
+                description: t(undefined, "command.avalon.card.description"),
+              },
+              {
+                type: "sub_command",
                 name: "manage",
                 description: t(undefined, "command.avalon.manage.description"),
               },
@@ -136,6 +150,37 @@ export function buildPlugin() {
                   removeGame(channelId);
                   return t(undefined, "error.stopped");
                 });
+              }
+              if (sub === "card") {
+                // Re-show the player's role card. Same payload as
+                // clicking the deal-reveal board's [查看身份] button —
+                // accessible at any time during the game so a player
+                // who lost the original ephemeral can pull it back up.
+                const existing = getGame(channelId);
+                if (!existing) {
+                  return {
+                    content: t(undefined, "error.notRunning"),
+                    ephemeral: true,
+                  };
+                }
+                if (!playerByUserId(existing, ctx.userId)) {
+                  return {
+                    content: t(undefined, "stage.deal.notInGame"),
+                    ephemeral: true,
+                  };
+                }
+                const reveal = await renderDealReveal(existing, ctx.userId);
+                if (!reveal) {
+                  return {
+                    content: t(undefined, "stage.deal.notInGame"),
+                    ephemeral: true,
+                  };
+                }
+                return {
+                  embeds: [reveal],
+                  components: dealRevealComponents(),
+                  ephemeral: true,
+                };
               }
               if (sub === "manage") {
                 // 15-min bot JWT — only used to bootstrap a plugin-side

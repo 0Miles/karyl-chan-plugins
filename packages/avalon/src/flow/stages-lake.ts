@@ -17,13 +17,14 @@ import { getGame } from "../game/store.js";
 import {
   editMessage,
   followupEphemeral,
+  toastEphemeral,
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
   type DiscordEmbed,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
-import { truncate } from "./presentation.js";
+import { truncate, viewCardButtonRow } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { findAsset } from "../art.js";
 import { endGame } from "./stages-ending.js";
@@ -99,7 +100,7 @@ export async function handleLakeClick(
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game || game.current?.kind !== "lake") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -107,7 +108,7 @@ export async function handleLakeClick(
   }
   const holder = playerByIndex(game, game.current.holderIndex);
   if (!holder || ctx.userId !== holder.userId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.lake.notHolder"),
     });
@@ -118,7 +119,7 @@ export async function handleLakeClick(
   const target = playerByIndex(game, seat);
   if (!target) return null;
   if (target.userId === holder.userId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.lake.cannotSelf"),
     });
@@ -127,7 +128,7 @@ export async function handleLakeClick(
   // Disallow re-inspecting a previous holder (encoded as a marker on
   // Player when the token last moved off them).
   if (target.lakeTarget !== null) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.lake.cannotRepeat"),
     });
@@ -231,5 +232,6 @@ function lakeComponents(state: GameState): DiscordActionRow[] {
   for (let i = 0; i < buttons.length; i += 5) {
     rows.push({ type: 1, components: buttons.slice(i, i + 5) });
   }
+  rows.push(viewCardButtonRow());
   return rows;
 }

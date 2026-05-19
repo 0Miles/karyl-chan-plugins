@@ -19,7 +19,7 @@ import {
   newGameState,
   type GameState,
 } from "../game/state.js";
-import { editMessage, followupEphemeral, sendMessage } from "./discord.js";
+import { editMessage, sendMessage, toastEphemeral } from "./discord.js";
 import { renderDealReveal, sendDealBoard } from "./stages.js";
 import { sampleNpcDisplayNames } from "../npc/names.js";
 
@@ -181,7 +181,7 @@ export async function handleSignupClick(
   const channelId = ctx.channelId!;
   const signup = signups.get(channelId);
   if (!signup) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -217,14 +217,14 @@ async function handleNpcAddClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (ctx.userId !== signup.hostUserId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.onlyHost"),
     });
     return null;
   }
   if (signup.players.size + signup.npcs.length >= MAX_PLAYERS) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.npcAtMax"),
     });
@@ -241,7 +241,7 @@ async function handleNpcAddClick(
     displayName: name,
   });
   await refreshSignupMessage(signup.channelId);
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content: t(undefined, "stage.signup.npcAdded", { name }),
   });
@@ -253,14 +253,14 @@ async function handleNpcRemoveClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (ctx.userId !== signup.hostUserId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.onlyHost"),
     });
     return null;
   }
   if (signup.npcs.length === 0) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.npcAtMin"),
     });
@@ -274,7 +274,7 @@ async function handleNpcRemoveClick(
     signup.ladyEnabled = false;
   }
   await refreshSignupMessage(signup.channelId);
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content: t(undefined, "stage.signup.npcRemoved"),
   });
@@ -292,14 +292,14 @@ async function handleLadyClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (ctx.userId !== signup.hostUserId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.onlyHost"),
     });
     return null;
   }
   if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.ladyNeeds7"),
     });
@@ -307,7 +307,7 @@ async function handleLadyClick(
   }
   signup.ladyEnabled = !signup.ladyEnabled;
   await refreshSignupMessage(signup.channelId);
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content: signup.ladyEnabled
       ? t(undefined, "stage.signup.ladyOn")
@@ -321,7 +321,7 @@ async function handleJoinClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (signup.players.has(ctx.userId)) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.alreadyJoined"),
     });
@@ -337,7 +337,7 @@ async function handleJoinClick(
       signup.npcs.pop();
       evictedNpc = true;
     } else {
-      await followupEphemeral({
+      await toastEphemeral({
         interactionToken: ctx.interactionToken,
         content: t(undefined, "stage.signup.tooMany"),
       });
@@ -346,7 +346,7 @@ async function handleJoinClick(
   }
   signup.players.set(ctx.userId, ctx.userDisplayName);
   await refreshSignupMessage(signup.channelId);
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content: t(
       undefined,
@@ -361,7 +361,7 @@ async function handleLeaveClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (!signup.players.has(ctx.userId)) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.notInList"),
     });
@@ -379,7 +379,7 @@ async function handleLeaveClick(
     signup.ladyEnabled = false;
   }
   await refreshSignupMessage(signup.channelId);
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content: t(undefined, "stage.signup.left"),
   });
@@ -391,7 +391,7 @@ async function handleStartClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (ctx.userId !== signup.hostUserId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.onlyHost"),
     });
@@ -399,7 +399,7 @@ async function handleStartClick(
   }
   const totalSize = signup.players.size + signup.npcs.length;
   if (totalSize < MIN_PLAYERS) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.notEnough"),
     });
@@ -455,7 +455,7 @@ async function handleCancelClick(
   signup: Signup,
 ): Promise<ComponentReply> {
   if (ctx.userId !== signup.hostUserId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.signup.onlyHost"),
     });

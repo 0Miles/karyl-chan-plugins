@@ -1,5 +1,9 @@
+import { componentCustomId } from "@karyl-chan/plugin-sdk";
+import { PLUGIN_KEY } from "../constants.js";
+import { t } from "../i18n/index.js";
 import type { VisionMarker } from "../game/vision.js";
 import type { GameState } from "../game/state.js";
+import type { DiscordActionRow } from "./discord.js";
 
 /**
  * Shared rendering helpers used by every stage's board / ephemeral
@@ -74,3 +78,25 @@ export const FACTION_COLOR = {
   arthur: 0x458588, // soft blue
   mordred: 0xcc241d, // soft red
 } as const;
+
+/**
+ * "🪪 查看角色卡" button row. Routed through the existing `deal`
+ * component handler — clicking it during any stage replays the
+ * deal-reveal ephemeral for the clicker. Attached at the bottom of
+ * every stage board so a player who lost track of their role can
+ * pull it back up without scrolling for the original deal-reveal
+ * message.
+ */
+export function viewCardButtonRow(): DiscordActionRow {
+  return {
+    type: 1,
+    components: [
+      {
+        type: 2,
+        style: 2,
+        custom_id: componentCustomId(PLUGIN_KEY, "deal"),
+        label: t(undefined, "stage.board.viewCard"),
+      },
+    ],
+  };
+}

@@ -15,12 +15,16 @@ import {
 import { getGame } from "../game/store.js";
 import {
   editMessage,
-  followupEphemeral,
+  toastEphemeral,
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
 } from "./discord.js";
-import { missionProgressLine, truncate } from "./presentation.js";
+import {
+  missionProgressLine,
+  truncate,
+  viewCardButtonRow,
+} from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { openPublicVote } from "./stages-publicvote.js";
 import { scheduleNpcStep } from "../npc/driver.js";
@@ -69,7 +73,7 @@ export async function handleAppointClick(
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game || game.current?.kind !== "appoint") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -77,7 +81,7 @@ export async function handleAppointClick(
   }
   const leaderPlayer = leader(game);
   if (ctx.userId !== leaderPlayer.userId) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.appoint.notLeader"),
     });
@@ -109,7 +113,7 @@ async function toggleAppoint(
     selected.splice(idx, 1);
   } else {
     if (selected.length >= num) {
-      await followupEphemeral({
+      await toastEphemeral({
         interactionToken: ctx.interactionToken,
         content: t(undefined, "stage.appoint.full"),
       });
@@ -139,7 +143,7 @@ async function confirmAppoint(
   if (game.current?.kind !== "appoint") return null;
   const num = currentMissionSize(game);
   if (game.current.selected.length !== num) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.appoint.needExact", { num }),
     });
@@ -226,6 +230,7 @@ function appointComponents(
       },
     ],
   });
+  rows.push(viewCardButtonRow());
   return rows;
 }
 

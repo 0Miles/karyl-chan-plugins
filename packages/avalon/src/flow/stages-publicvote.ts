@@ -17,12 +17,12 @@ import {
 import { getGame } from "../game/store.js";
 import {
   editMessage,
-  followupEphemeral,
   sendMessage,
+  toastEphemeral,
   type DiscordActionRow,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
-import { missionProgressLine } from "./presentation.js";
+import { missionProgressLine, viewCardButtonRow } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
 import { scheduleNpcStep } from "../npc/driver.js";
@@ -70,7 +70,7 @@ export async function handlePublicVoteClick(
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
   if (!game || game.current?.kind !== "publicVote") {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "error.notRunning"),
     });
@@ -78,14 +78,14 @@ export async function handlePublicVoteClick(
   }
   const me = playerByUserId(game, ctx.userId);
   if (!me) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.publicVote.notPlayer"),
     });
     return null;
   }
   if (game.current.votes[ctx.userId]) {
-    await followupEphemeral({
+    await toastEphemeral({
       interactionToken: ctx.interactionToken,
       content: t(undefined, "stage.publicVote.alreadyVoted"),
     });
@@ -98,7 +98,7 @@ export async function handlePublicVoteClick(
     recordMvpRejection(game, me, game.current.missionMembers);
   }
 
-  await followupEphemeral({
+  await toastEphemeral({
     interactionToken: ctx.interactionToken,
     content: t(undefined, "stage.publicVote.recorded", {
       vote:
@@ -279,5 +279,6 @@ export function publicVoteComponents(): DiscordActionRow[] {
         },
       ],
     },
+    viewCardButtonRow(),
   ];
 }
