@@ -27,6 +27,7 @@ import { truncate } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { findAsset } from "../art.js";
 import { endGame } from "./stages-ending.js";
+import { scheduleNpcStep } from "../npc/driver.js";
 
 /**
  * Resolve the optional lake-of-the-lady thumbnail URL. Returns
@@ -81,6 +82,7 @@ export async function openLake(state: GameState): Promise<void> {
     messageId: sent.id,
     holderIndex: state.ladyHolderIndex,
   };
+  scheduleNpcStep(state);
 }
 
 /** Returns the embed with the thumbnail set when present. */

@@ -22,6 +22,7 @@ import {
 import { missionProgressLine, truncate } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { openPublicVote } from "./stages-publicvote.js";
+import { scheduleNpcStep } from "../npc/driver.js";
 
 /**
  * Round opener. Posts the appoint board and primes
@@ -58,6 +59,7 @@ export async function openAppoint(state: GameState): Promise<void> {
     selected: [],
   };
   void num;
+  scheduleNpcStep(state);
 }
 
 export async function handleAppointClick(

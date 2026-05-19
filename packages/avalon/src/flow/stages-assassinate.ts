@@ -23,6 +23,7 @@ import {
 import { truncate } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
+import { scheduleNpcStep } from "../npc/driver.js";
 
 /**
  * Assassinate stage:
@@ -62,6 +63,7 @@ export async function openAssassinate(state: GameState): Promise<void> {
     kind: "assassinate",
     messageId: sent.id,
   };
+  scheduleNpcStep(state);
 }
 
 export async function handleAssassinateClick(

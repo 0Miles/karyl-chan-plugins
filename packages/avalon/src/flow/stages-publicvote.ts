@@ -24,6 +24,7 @@ import { openAppoint } from "./stages-appoint.js";
 import { missionProgressLine } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
+import { scheduleNpcStep } from "../npc/driver.js";
 
 /**
  * Open the public-vote stage. Every seated player gets a turn at the
@@ -59,6 +60,7 @@ export async function openPublicVote(
     missionMembers,
     votes: {},
   };
+  scheduleNpcStep(state);
 }
 
 export async function handlePublicVoteClick(
@@ -119,7 +121,7 @@ export async function handlePublicVoteClick(
   return null;
 }
 
-async function resolvePublicVote(game: GameState): Promise<void> {
+export async function resolvePublicVote(game: GameState): Promise<void> {
   if (game.current?.kind !== "publicVote") return;
   const votes = Object.values(game.current.votes);
   const yes = votes.filter((v) => v === "yes").length;
@@ -162,7 +164,7 @@ async function resolvePublicVote(game: GameState): Promise<void> {
 
 // ── rendering ──────────────────────────────────────────────────────────
 
-function renderPublicVoteEmbed(
+export function renderPublicVoteEmbed(
   state: GameState,
   missionMembers: number[],
   votes: Record<string, "yes" | "no">,
@@ -254,7 +256,7 @@ function renderPublicVoteResolved(
   };
 }
 
-function publicVoteComponents(): DiscordActionRow[] {
+export function publicVoteComponents(): DiscordActionRow[] {
   return [
     {
       type: 1,

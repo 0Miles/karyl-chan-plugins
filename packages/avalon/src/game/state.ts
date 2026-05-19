@@ -300,3 +300,17 @@ export function settleAssassinate(state: GameState): Verdict {
 export function factionOf(player: Player): Faction {
   return ROLES[player.position].faction;
 }
+
+/**
+ * Synthetic NPC users carry an `npc:<n>` userId. They occupy real seats
+ * with real Player records but never own a Discord interaction token —
+ * the NPC driver mutates their `votes` / `selected` / etc. directly
+ * instead of routing through the click handlers.
+ */
+export const NPC_USERID_PREFIX = "npc:";
+export function isNpcUserId(userId: string): boolean {
+  return userId.startsWith(NPC_USERID_PREFIX);
+}
+export function isNpc(player: Player): boolean {
+  return isNpcUserId(player.userId);
+}

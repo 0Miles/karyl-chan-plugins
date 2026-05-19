@@ -29,6 +29,7 @@ import { openAssassinate } from "./stages-assassinate.js";
 import { missionProgressLine } from "./presentation.js";
 import { runtime } from "./runtime.js";
 import { endGame } from "./stages-ending.js";
+import { scheduleNpcStep } from "../npc/driver.js";
 
 /**
  * Mission voting. Discord can't ack a private vote on a public
@@ -70,6 +71,7 @@ export async function openPrivateVote(
     missionMembers,
     votes: {},
   };
+  scheduleNpcStep(state);
 }
 
 export async function handlePrivateVoteClick(
@@ -201,7 +203,7 @@ async function handlePrivateBallot(
   return null;
 }
 
-async function resolvePrivateVote(game: GameState): Promise<void> {
+export async function resolvePrivateVote(game: GameState): Promise<void> {
   if (game.current?.kind !== "privateVote") return;
   const ballots = Object.values(game.current.votes);
   const failCount = ballots.filter((v) => v === "fail").length;
@@ -250,7 +252,7 @@ async function resolvePrivateVote(game: GameState): Promise<void> {
 
 // ── rendering ──────────────────────────────────────────────────────────
 
-function renderPrivateVoteEmbed(
+export function renderPrivateVoteEmbed(
   state: GameState,
   missionMembers: number[],
   voted: number,
@@ -329,7 +331,7 @@ function renderPrivateVoteResolved(
   };
 }
 
-function privateVoteComponents(): DiscordActionRow[] {
+export function privateVoteComponents(): DiscordActionRow[] {
   return [
     {
       type: 1,

@@ -4,6 +4,7 @@ import { ROLES } from "../game/roles.js";
 import { removeGame } from "../game/store.js";
 import { sendMessage } from "./discord.js";
 import { FACTION_COLOR, missionProgressLine } from "./presentation.js";
+import { clearNpcTimer } from "../npc/driver.js";
 
 /**
  * End-of-game board. Reveals every seat's role and the reason the
@@ -46,6 +47,7 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
   // The session is over; future `/avalon start` re-creates fresh
   // state. We keep the per-channel sign-up map separate (see
   // signup.ts) so its lifecycle isn't entangled.
+  clearNpcTimer(state.channelId);
   removeGame(state.channelId);
 }
 
