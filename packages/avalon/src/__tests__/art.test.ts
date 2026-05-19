@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSET_KEYS,
   extForMime,
   isSafeArtFilename,
+  isValidAssetKey,
   isValidPosition,
   isValidVariant,
   isVariantPosition,
@@ -135,6 +137,28 @@ describe("variant positions metadata", () => {
     expect(isValidVariant("loyal", 1.5)).toBe(false);
     expect(isValidVariant("loyal", Number.NaN)).toBe(false);
     expect(isValidVariant("loyal", Number.POSITIVE_INFINITY)).toBe(false);
+  });
+});
+
+describe("game-element assets metadata", () => {
+  it("ASSET_KEYS currently lists exactly one key (lake)", () => {
+    expect([...ASSET_KEYS]).toEqual(["lake"]);
+  });
+  it("isValidAssetKey accepts known asset keys only", () => {
+    expect(isValidAssetKey("lake")).toBe(true);
+    expect(isValidAssetKey("LAKE")).toBe(false);
+    expect(isValidAssetKey("throne")).toBe(false);
+    expect(isValidAssetKey("")).toBe(false);
+  });
+  it("isSafeArtFilename accepts <asset>.<ext>", () => {
+    expect(isSafeArtFilename("lake.png")).toBe(true);
+    expect(isSafeArtFilename("lake.jpg")).toBe(true);
+    expect(isSafeArtFilename("lake.webp")).toBe(true);
+    expect(isSafeArtFilename("lake.gif")).toBe(true);
+  });
+  it("isSafeArtFilename rejects unknown asset keys", () => {
+    expect(isSafeArtFilename("throne.png")).toBe(false);
+    expect(isSafeArtFilename("questCard.png")).toBe(false);
   });
 });
 

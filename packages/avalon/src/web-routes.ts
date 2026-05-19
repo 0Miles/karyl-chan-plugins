@@ -22,14 +22,18 @@ import {
   artFilePath,
   extForMime,
   isSafeArtFilename,
+  isValidAssetKey,
   isValidPosition,
   isValidVariant,
   isVariantPosition,
   listArt,
+  listAssets,
   mimeForArtFile,
   removeArt,
+  removeAsset,
   removeVariantArt,
   saveArt,
+  saveAsset,
   saveVariantArt,
 } from "./art.js";
 
@@ -279,7 +283,7 @@ export async function registerWebRoutes(
   // directly and Discord can fetch it for the role-reveal embed.
   server.get("/api/manage/art", async (request, reply) => {
     if (!authManageAccess(request, reply)) return;
-    const entries = await listArt();
+    const [entries, assets] = await Promise.all([listArt(), listAssets()]);
     return {
       art: entries.map((e) => ({
         position: e.position,
@@ -287,6 +291,12 @@ export async function registerWebRoutes(
         filename: e.filename,
         size: e.size,
         url: `${getEffectiveBase()}/art/${e.filename}?v=${Math.floor(e.mtimeMs)}`,
+      })),
+      assets: assets.map((a) => ({
+        assetKey: a.assetKey,
+        filename: a.filename,
+        size: a.size,
+        url: `${getEffectiveBase()}/art/${a.filename}?v=${Math.floor(a.mtimeMs)}`,
       })),
     };
   });
@@ -391,6 +401,44 @@ export async function registerWebRoutes(
       if (!removed) {
         return reply.code(404).send({ error: "No artwork stored for this slot" });
       }
+      return { ok: true };
+    },
+  );
+
+  // ── Game-element assets (lake, …) ────────────────────────────────
+  // Separate route namespace from role art so the URL shape stays
+  // honest: `lake` isn't a role. Same multipart + 5 MB + mime guards
+  // via the shared readUpload helper.
+
+  server.post<{ Params: { key: string } }>(
+    "/api/manage/asset/:key",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const key = request.params.key;
+      if (!isValidAssetKey(key)) {
+        return reply.code(400).send({ error: "Unknown asset" });
+      }
+      const upload = await readUpload(request, reply);
+      if (!upload) return;
+      const filename = await saveAsset(key, upload.buf, upload.ext);
+      return {
+        assetKey: key,
+        filename,
+        url: `${getEffectiveBase()}/art/${filename}?v=${Date.now()}`,
+      };
+    },
+  );
+
+  server.delete<{ Params: { key: string } }>(
+    "/api/manage/asset/:key",
+    async (request, reply) => {
+      if (!authManageAccess(request, reply)) return;
+      const key = request.params.key;
+      if (!isValidAssetKey(key)) {
+        return reply.code(400).send({ error: "Unknown asset" });
+      }
+      const removed = await removeAsset(key);
+      if (!removed) return reply.code(404).send({ error: "No asset stored" });
       return { ok: true };
     },
   );

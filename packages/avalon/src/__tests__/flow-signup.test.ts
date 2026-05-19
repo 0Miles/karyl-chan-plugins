@@ -133,3 +133,63 @@ describe("B-001: 5-player signup → host start triggers deal + deal board send"
     expect(sends.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("B-003: lady-of-the-lake toggle on signup", () => {
+  it("6-player signup: lady button is rejected (under threshold)", async () => {
+    await buildSignupWith(6);
+    harness.resetCalls();
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u0",
+        componentId: "sig",
+        tail: "lady",
+      }),
+      "lady",
+    );
+    // ephemeral fires (ladyNeeds7); no message.edit on the board.
+    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+  });
+  it("7-player signup: host toggles lady on, then off", async () => {
+    await buildSignupWith(7);
+    harness.resetCalls();
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u0",
+        componentId: "sig",
+        tail: "lady",
+      }),
+      "lady",
+    );
+    // Board repainted (lady state) + ephemeral confirm.
+    expect(harness.callsTo("messages.edit").length).toBeGreaterThan(0);
+    // Toggle off
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u0",
+        componentId: "sig",
+        tail: "lady",
+      }),
+      "lady",
+    );
+    expect(harness.callsTo("interactions.followup").length).toBeGreaterThanOrEqual(2);
+  });
+  it("non-host lady click is rejected", async () => {
+    await buildSignupWith(7);
+    harness.resetCalls();
+    await handleSignupClick(
+      fakeClickContext({
+        channelId: "c-signup",
+        userId: "u3", // not host
+        componentId: "sig",
+        tail: "lady",
+      }),
+      "lady",
+    );
+    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    // No board repaint for a rejected click.
+    expect(harness.callsTo("messages.edit").length).toBe(0);
+  });
+});

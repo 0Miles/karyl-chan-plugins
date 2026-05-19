@@ -180,3 +180,50 @@ describe("art fs: listArt sorts by position then variant", () => {
     ]);
   });
 });
+
+describe("art fs: assets (lake)", () => {
+  it("saveAsset + findAsset round-trip", async () => {
+    const art = await import("../art.js");
+    await art.saveAsset("lake", TINY_PNG, "png");
+    const hit = await art.findAsset("lake");
+    expect(hit).not.toBeNull();
+    expect(hit!.filename).toBe("lake.png");
+    expect(hit!.etag).toMatch(/^[a-f0-9]{8}$/);
+  });
+  it("saveAsset replaces a prior extension", async () => {
+    const art = await import("../art.js");
+    await art.saveAsset("lake", TINY_PNG, "jpg");
+    await art.saveAsset("lake", TINY_PNG, "png");
+    const list = await art.listAssets();
+    expect(list).toHaveLength(1);
+    expect(list[0].filename).toBe("lake.png");
+  });
+  it("removeAsset returns true on success, false when nothing on disk", async () => {
+    const art = await import("../art.js");
+    await art.saveAsset("lake", TINY_PNG, "png");
+    expect(await art.removeAsset("lake")).toBe(true);
+    expect(await art.findAsset("lake")).toBeNull();
+    expect(await art.removeAsset("lake")).toBe(false);
+  });
+  it("listArt does NOT include assets; listAssets does NOT include roles", async () => {
+    const art = await import("../art.js");
+    await art.saveArt("merlin", TINY_PNG, "png");
+    await art.saveVariantArt("loyal", 1, TINY_PNG, "png");
+    await art.saveAsset("lake", TINY_PNG, "png");
+
+    const roleEntries = await art.listArt();
+    expect(roleEntries.map((e) => e.filename).sort()).toEqual(
+      ["loyal-1.png", "merlin.png"].sort(),
+    );
+
+    const assetEntries = await art.listAssets();
+    expect(assetEntries.map((e) => e.filename)).toEqual(["lake.png"]);
+  });
+  it("cleanupOrphanArt keeps a legitimate lake.<ext>", async () => {
+    const art = await import("../art.js");
+    await art.saveAsset("lake", TINY_PNG, "png");
+    const res = await art.cleanupOrphanArt();
+    expect(res.removed).toEqual([]);
+    expect(await art.findAsset("lake")).not.toBeNull();
+  });
+});

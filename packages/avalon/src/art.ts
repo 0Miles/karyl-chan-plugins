@@ -69,6 +69,23 @@ export const VARIANT_POSITIONS: Readonly<Partial<Record<Position, number>>> = {
   minion: 3,
 };
 
+/**
+ * Non-role game-element assets. Kept in the same flat art directory
+ * as role art but addressed separately so they don't pollute the
+ * `Position` type — lake is a game mechanic, not a role.
+ *
+ * Filename shape: `<key>.<ext>` directly in ART_DIR. The asset keys
+ * are listed here exhaustively; `isSafeArtFilename` accepts them via
+ * a dedicated regex group so a typo can't slip onto disk.
+ */
+export const ASSET_KEYS = ["lake"] as const;
+export type AssetKey = (typeof ASSET_KEYS)[number];
+const ASSET_KEY_SET: ReadonlySet<string> = new Set(ASSET_KEYS);
+
+export function isValidAssetKey(s: string): s is AssetKey {
+  return ASSET_KEY_SET.has(s);
+}
+
 export function isVariantPosition(p: Position): boolean {
   return VARIANT_POSITIONS[p] !== undefined;
 }
@@ -102,22 +119,27 @@ export function mimeForArtFile(filename: string): string {
 }
 
 // Single-image positions match `<position>.<ext>`. Variant positions
-// match `<position>-<digit>.<ext>` where digit ∈ 1..max — anything
-// outside that range is rejected at parse time so a typo can't end up
-// on disk.
+// match `<position>-<digit>.<ext>` where digit ∈ 1..max. Assets match
+// `<asset-key>.<ext>`. Anything outside these shapes is rejected at
+// parse time so a typo can't end up on disk.
 const SINGLE_FILENAME_RE = /^(merlin|percival|assassin|morgana|mordred|oberon)\.(jpe?g|png|webp|gif)$/i;
 const VARIANT_FILENAME_RE = /^(loyal|minion)-(\d+)\.(jpe?g|png|webp|gif)$/i;
+const ASSET_FILENAME_RE = /^([a-z][a-z0-9-]*)\.(jpe?g|png|webp|gif)$/i;
 
 export function isSafeArtFilename(name: string): boolean {
   if (name.includes("/") || name.includes("\\") || name.includes("..")) {
     return false;
   }
   if (SINGLE_FILENAME_RE.test(name)) return true;
-  const m = VARIANT_FILENAME_RE.exec(name);
-  if (m) {
-    const pos = m[1].toLowerCase() as Position;
-    const variant = Number(m[2]);
+  const v = VARIANT_FILENAME_RE.exec(name);
+  if (v) {
+    const pos = v[1].toLowerCase() as Position;
+    const variant = Number(v[2]);
     return isValidVariant(pos, variant);
+  }
+  const a = ASSET_FILENAME_RE.exec(name);
+  if (a) {
+    return isValidAssetKey(a[1].toLowerCase());
   }
   return false;
 }
@@ -223,6 +245,103 @@ export async function removeVariantArt(
     // nothing
   }
   return removed;
+}
+
+// ── Non-role game-element assets ─────────────────────────────────────
+// Same flat-directory storage as role art, but addressed by a
+// separately-validated asset key so a future "throne" / "questCard" /
+// etc. doesn't have to pretend to be a Position. Filename: `<key>.<ext>`.
+
+/** Save bytes for an asset slot, replacing any prior file. */
+export async function saveAsset(
+  key: AssetKey,
+  buffer: Buffer,
+  ext: string,
+): Promise<string> {
+  await ensureArtDir();
+  // Reuse the slot-cleanup helper — the prefix `<key>.` doesn't
+  // collide with any role filename pattern (single roles have
+  // distinct names; variant roles always have a `-<n>` infix).
+  await deleteSlotFiles(key as unknown as Position, null);
+  const filename = `${key}.${ext}`;
+  await writeFile(join(ART_DIR, filename), buffer);
+  return filename;
+}
+
+/** Remove the file for an asset slot. */
+export async function removeAsset(key: AssetKey): Promise<boolean> {
+  let removed = false;
+  try {
+    const files = await readdir(ART_DIR);
+    const prefix = `${key}.`;
+    for (const f of files.filter((f) => f.startsWith(prefix))) {
+      await unlink(join(ART_DIR, f)).catch(() => undefined);
+      removed = true;
+    }
+  } catch {
+    // nothing
+  }
+  return removed;
+}
+
+/** Asset lookup for stage renderers (lake board, ephemeral result). */
+export async function findAsset(
+  key: AssetKey,
+): Promise<{ filename: string; etag: string } | null> {
+  let files: string[];
+  try {
+    files = await readdir(ART_DIR);
+  } catch {
+    return null;
+  }
+  const match = files.find(
+    (f) => f.startsWith(`${key}.`) && isSafeArtFilename(f),
+  );
+  if (!match) return null;
+  return statEntry(match);
+}
+
+export interface AssetEntry {
+  assetKey: AssetKey;
+  filename: string;
+  size: number;
+  mtimeMs: number;
+}
+
+/** List every stored asset file (mirrors listArt's role surface). */
+export async function listAssets(): Promise<AssetEntry[]> {
+  const out: AssetEntry[] = [];
+  let files: string[];
+  try {
+    files = await readdir(ART_DIR);
+  } catch {
+    return out;
+  }
+  for (const f of files) {
+    if (!isSafeArtFilename(f)) continue;
+    // Skip role files — role filename regexes are checked first
+    // inside `isSafeArtFilename`; we re-check here to keep listAssets
+    // self-contained.
+    if (SINGLE_FILENAME_RE.test(f)) continue;
+    if (VARIANT_FILENAME_RE.test(f)) continue;
+    const m = ASSET_FILENAME_RE.exec(f);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    if (!isValidAssetKey(key)) continue;
+    try {
+      const st = await stat(join(ART_DIR, f));
+      out.push({
+        assetKey: key,
+        filename: f,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+      });
+    } catch {
+      // race with delete — skip
+    }
+  }
+  out.sort((a, b) => a.assetKey.localeCompare(b.assetKey));
+  return out;
 }
 
 /**

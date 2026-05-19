@@ -20,11 +20,27 @@ import {
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
+  type DiscordEmbed,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
 import { truncate } from "./presentation.js";
 import { runtime } from "./runtime.js";
+import { findAsset } from "../art.js";
 import { endGame } from "./stages-ending.js";
+
+/**
+ * Resolve the optional lake-of-the-lady thumbnail URL. Returns
+ * undefined when the admin hasn't uploaded one; callers spread the
+ * resulting object so a missing thumbnail simply omits the embed
+ * field (same pattern as renderDealReveal).
+ */
+async function lakeThumbnail(): Promise<{ url: string } | undefined> {
+  const art = await findAsset("lake").catch(() => null);
+  if (!art) return undefined;
+  return {
+    url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}`,
+  };
+}
 
 /**
  * Lake of the Lady (湖中女神):
@@ -46,9 +62,10 @@ export async function openLake(state: GameState): Promise<void> {
   if (state.ladyHolderIndex === null) return;
   const holder = playerByIndex(state, state.ladyHolderIndex);
   if (!holder) return;
+  const thumbnail = await lakeThumbnail();
   const sent = await sendMessage({
     channelId: state.channelId,
-    embeds: [renderLakeEmbed(state, holder.displayName)],
+    embeds: [withThumbnail(renderLakeEmbed(state, holder.displayName), thumbnail)],
     components: lakeComponents(state),
   });
   if (!sent) {
@@ -64,6 +81,14 @@ export async function openLake(state: GameState): Promise<void> {
     messageId: sent.id,
     holderIndex: state.ladyHolderIndex,
   };
+}
+
+/** Returns the embed with the thumbnail set when present. */
+function withThumbnail(
+  embed: DiscordEmbed,
+  thumbnail: { url: string } | undefined,
+): DiscordEmbed {
+  return thumbnail ? { ...embed, thumbnail } : embed;
 }
 
 export async function handleLakeClick(
@@ -111,20 +136,24 @@ export async function handleLakeClick(
   // public board's text neutral ("X 用湖中女神查驗了 Y") so
   // bystanders can't infer the faction.
   const faction = factionOf(target);
+  const thumbnail = await lakeThumbnail();
   await followupEphemeral({
     interactionToken: ctx.interactionToken,
     embeds: [
-      {
-        color: EMBED_COLOR,
-        title: t(undefined, "stage.lake.title"),
-        description: t(undefined, "stage.lake.result", {
-          target: `**${target.displayName}**`,
-          faction:
-            faction === "arthur"
-              ? t(undefined, "faction.arthur")
-              : t(undefined, "faction.mordred"),
-        }),
-      },
+      withThumbnail(
+        {
+          color: EMBED_COLOR,
+          title: t(undefined, "stage.lake.title"),
+          description: t(undefined, "stage.lake.result", {
+            target: `**${target.displayName}**`,
+            faction:
+              faction === "arthur"
+                ? t(undefined, "faction.arthur")
+                : t(undefined, "faction.mordred"),
+          }),
+        },
+        thumbnail,
+      ),
     ],
   });
 
@@ -138,14 +167,17 @@ export async function handleLakeClick(
     channelId: game.channelId,
     messageId: game.current.messageId,
     embeds: [
-      {
-        color: EMBED_COLOR,
-        title: t(undefined, "stage.lake.title"),
-        description: t(undefined, "stage.lake.checked", {
-          holder: `**${holder.displayName}**`,
-          target: `**${target.displayName}**`,
-        }),
-      },
+      withThumbnail(
+        {
+          color: EMBED_COLOR,
+          title: t(undefined, "stage.lake.title"),
+          description: t(undefined, "stage.lake.checked", {
+            holder: `**${holder.displayName}**`,
+            target: `**${target.displayName}**`,
+          }),
+        },
+        thumbnail,
+      ),
     ],
     components: [],
   });

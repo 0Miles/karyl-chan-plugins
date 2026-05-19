@@ -33,6 +33,15 @@ interface Signup {
   hostDisplayName: string;
   messageId: string;
   players: Map<string, string>; // userId → displayName, insertion-ordered
+  /**
+   * Host-toggled at signup time via the `sig:lady` button. Surfaces in
+   * the UI only when player count ≥ LADY_MIN_PLAYERS (Avalon rulebook
+   * gates Lady-of-the-Lake to 7+ player tables). The handler resolves
+   * the effective ladyEnabled on start so a stale `true` on a roster
+   * that dropped below the threshold doesn't enable a lake that can
+   * never fire.
+   */
+  ladyEnabled: boolean;
 }
 
 const signups = new Map<string, Signup>();
@@ -47,7 +56,16 @@ const signups = new Map<string, Signup>();
 const MIN_PLAYERS = 5;
 const MAX_PLAYERS = 10;
 
-export type SignupAction = "join" | "leave" | "start" | "cancel";
+/**
+ * Lady-of-the-Lake is only legal at 7+ player tables per the
+ * rulebook. The toggle button is hidden below this threshold; if a
+ * roster drops below it after toggling on, the effective value is
+ * forced false at start so we don't dump a dead `ladyEnabled` flag
+ * onto the GameState.
+ */
+const LADY_MIN_PLAYERS = 7;
+
+export type SignupAction = "join" | "leave" | "start" | "cancel" | "lady";
 
 /**
  * Entry point from the `/avalon start` slash. Posts the public sign-up
@@ -64,10 +82,15 @@ export async function startSignup(
       return t(undefined, "error.alreadyRunning");
     }
     const hostMention = `<@${ctx.userId}>`;
+    // Initial board: empty roster, no lady toggle (under 7 players).
     const sent = await sendMessage({
       channelId,
       embeds: [renderSignupEmbed(hostMention, [])],
-      components: signupComponents({ canStart: false }),
+      components: signupComponents({
+        canStart: false,
+        showLady: false,
+        ladyEnabled: false,
+      }),
     });
     if (!sent) {
       return "⚠ Failed to post sign-up message.";
@@ -79,6 +102,7 @@ export async function startSignup(
       hostDisplayName: ctx.userDisplayName,
       messageId: sent.id,
       players: new Map([[ctx.userId, ctx.userDisplayName]]),
+      ladyEnabled: false,
     });
     // Immediately repaint so the host shows up in the roster.
     await refreshSignupMessage(channelId);
@@ -128,9 +152,46 @@ export async function handleSignupClick(
       return handleStartClick(ctx, signup);
     case "cancel":
       return handleCancelClick(ctx, signup);
+    case "lady":
+      return handleLadyClick(ctx, signup);
     default:
       return null;
   }
+}
+
+/**
+ * Host-only toggle for the Lady-of-the-Lake mechanic. Only meaningful
+ * once the roster hits LADY_MIN_PLAYERS; the toggle button is hidden
+ * below that. Non-host clicks ephemeral-reject the same as start /
+ * cancel; under-quota clicks ephemeral with "需要 7 人才能啟用".
+ */
+async function handleLadyClick(
+  ctx: ComponentContext,
+  signup: Signup,
+): Promise<ComponentReply> {
+  if (ctx.userId !== signup.hostUserId) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.signup.onlyHost"),
+    });
+    return null;
+  }
+  if (signup.players.size < LADY_MIN_PLAYERS) {
+    await followupEphemeral({
+      interactionToken: ctx.interactionToken,
+      content: t(undefined, "stage.signup.ladyNeeds7"),
+    });
+    return null;
+  }
+  signup.ladyEnabled = !signup.ladyEnabled;
+  await refreshSignupMessage(signup.channelId);
+  await followupEphemeral({
+    interactionToken: ctx.interactionToken,
+    content: signup.ladyEnabled
+      ? t(undefined, "stage.signup.ladyOn")
+      : t(undefined, "stage.signup.ladyOff"),
+  });
+  return null;
 }
 
 async function handleJoinClick(
@@ -200,9 +261,13 @@ async function handleStartClick(
     });
     return null;
   }
-  // TODO (next commit): show the lady-of-the-lake option dialog
-  // before promoting to GameState. For now default-off keeps the
-  // smoke test deterministic.
+  // B-003: Lady-of-the-Lake toggle is now exposed via the `sig:lady`
+  // button on the signup board. Effective value is gated by
+  // LADY_MIN_PLAYERS — a stale `true` on a roster that dropped below
+  // the threshold forces back to false so we don't ship a dead flag
+  // into the GameState.
+  const effectiveLady =
+    signup.ladyEnabled && signup.players.size >= LADY_MIN_PLAYERS;
   const game = newGameState({
     guildId: signup.guildId,
     channelId: signup.channelId,
@@ -211,7 +276,7 @@ async function handleStartClick(
       userId,
       displayName,
     })),
-    ladyEnabled: false,
+    ladyEnabled: effectiveLady,
   });
   deal(game);
   setGame(signup.channelId, game);
@@ -265,31 +330,50 @@ async function handleCancelClick(
 
 // ── rendering ───────────────────────────────────────────────────────────
 
-function renderSignupEmbed(hostMention: string, names: string[]) {
+function renderSignupEmbed(
+  hostMention: string,
+  names: string[],
+  opts: { showLady: boolean; ladyEnabled: boolean } = {
+    showLady: false,
+    ladyEnabled: false,
+  },
+) {
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    {
+      name: t(undefined, "stage.signup.fieldCount"),
+      value: String(names.length),
+      inline: true,
+    },
+  ];
+  if (opts.showLady) {
+    fields.push({
+      name: t(undefined, "stage.signup.fieldLady"),
+      value: opts.ladyEnabled
+        ? t(undefined, "stage.signup.ladyStateOn")
+        : t(undefined, "stage.signup.ladyStateOff"),
+      inline: true,
+    });
+  }
+  if (names.length > 0) {
+    fields.push({
+      name: t(undefined, "stage.signup.fieldRoster"),
+      value: names.map((n) => `\`${n}\``).join("\n"),
+      inline: false,
+    });
+  }
   return {
     title: t(undefined, "stage.signup.title"),
     description: t(undefined, "stage.signup.content", { host: hostMention }),
     color: EMBED_COLOR,
-    fields: [
-      {
-        name: t(undefined, "stage.signup.fieldCount"),
-        value: String(names.length),
-        inline: true,
-      },
-      ...(names.length > 0
-        ? [
-            {
-              name: t(undefined, "stage.signup.fieldRoster"),
-              value: names.map((n) => `\`${n}\``).join("\n"),
-              inline: false,
-            },
-          ]
-        : []),
-    ],
+    fields,
   };
 }
 
-function signupComponents(opts: { canStart: boolean }) {
+function signupComponents(opts: {
+  canStart: boolean;
+  showLady: boolean;
+  ladyEnabled: boolean;
+}) {
   const row = [
     {
       type: 2 as const,
@@ -317,6 +401,20 @@ function signupComponents(opts: { canStart: boolean }) {
       label: t(undefined, "stage.signup.cancel"),
     },
   ];
+  // Lady-of-the-Lake toggle only renders when the roster crosses the
+  // rulebook threshold; below that there's no legal mode to enable.
+  // Green when active, grey when off — mirrors the radio plugin's
+  // loop-mode toggle convention.
+  if (opts.showLady) {
+    row.push({
+      type: 2 as const,
+      style: opts.ladyEnabled ? (3 as const) : (2 as const),
+      custom_id: componentCustomId(PLUGIN_KEY, "sig", "lady"),
+      label: opts.ladyEnabled
+        ? t(undefined, "stage.signup.ladyButtonOn")
+        : t(undefined, "stage.signup.ladyButtonOff"),
+    });
+  }
   return [{ type: 1 as const, components: row }];
 }
 
@@ -325,14 +423,22 @@ async function refreshSignupMessage(channelId: string): Promise<void> {
   if (!signup) return;
   const names = [...signup.players.values()];
   const hostMention = `<@${signup.hostUserId}>`;
+  const showLady = signup.players.size >= LADY_MIN_PLAYERS;
   await editMessage({
     channelId,
     messageId: signup.messageId,
-    embeds: [renderSignupEmbed(hostMention, names)],
+    embeds: [
+      renderSignupEmbed(hostMention, names, {
+        showLady,
+        ladyEnabled: signup.ladyEnabled,
+      }),
+    ],
     components: signupComponents({
       canStart:
         signup.players.size >= MIN_PLAYERS &&
         signup.players.size <= MAX_PLAYERS,
+      showLady,
+      ladyEnabled: signup.ladyEnabled,
     }),
   });
 }
