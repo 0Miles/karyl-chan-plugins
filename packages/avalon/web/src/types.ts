@@ -32,10 +32,16 @@ export type RolePosition =
   | "morgana"
   | "mordred"
   | "oberon"
-  | "loyal";
+  | "loyal"
+  // Pre-staged for the Minion-of-Mordred deck slot; the backend
+  // accepts uploads for these slots but the role isn't yet dealt
+  // in any rolesForPlayerCount config.
+  | "minion";
 
 export interface RoleArtEntry {
   position: RolePosition;
+  /** Present only for variant positions (loyal / minion); 1-indexed. */
+  variant?: number;
   filename: string;
   size: number;
   url: string;
