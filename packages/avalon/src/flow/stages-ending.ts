@@ -17,8 +17,10 @@ import { clearNpcTimer } from "../npc/driver.js";
 /**
  * End-of-game board. Reveals every seat's role with a faction
  * marker, names the reason the verdict landed where it did, and
- * highlights the MVP — the "decisive figure" of the game — with
- * their card face as the embed's main image.
+ * subtly highlights the MVP — the "decisive figure" — by using
+ * their card art as the embed's main image. No explicit "MVP: X"
+ * field; the card itself is the hint, leaving the read as a
+ * conversation prompt rather than an announcement.
  *
  * After posting, clears the in-memory state so a fresh
  * `/avalon start` can run in this channel.
@@ -36,38 +38,24 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
   const mvp = computeMvp(state, verdict);
   const mvpImage = mvp ? await resolveMvpImage(state, mvp) : undefined;
 
-  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
-    {
-      name: t(undefined, "stage.board.fieldProgress"),
-      value: missionProgressLine(state),
-      inline: false,
-    },
-    {
-      name: t(undefined, "stage.ending.fieldRoster"),
-      value: rosterLines.join("\n"),
-      inline: false,
-    },
-  ];
-  if (mvp) {
-    fields.push({
-      name: t(undefined, "stage.ending.fieldMvp"),
-      value: t(undefined, "stage.ending.mvpLine", {
-        marker: factionMarker(mvp),
-        name: mvp.displayName,
-        role: t(undefined, ROLES[mvp.position].nameKey),
-        reason: mvpReasonText(verdict),
-      }),
-      inline: false,
-    });
-  }
-
   const embed: DiscordEmbed = {
     title: arthurWin
       ? `🏆 ${t(undefined, "stage.ending.titleArthur")}`
       : `🗡 ${t(undefined, "stage.ending.titleMordred")}`,
     description: reasonText(verdict),
     color: arthurWin ? FACTION_COLOR.arthur : FACTION_COLOR.mordred,
-    fields,
+    fields: [
+      {
+        name: t(undefined, "stage.board.fieldProgress"),
+        value: missionProgressLine(state),
+        inline: false,
+      },
+      {
+        name: t(undefined, "stage.ending.fieldRoster"),
+        value: rosterLines.join("\n"),
+        inline: false,
+      },
+    ],
     ...(mvpImage ? { image: mvpImage } : {}),
   };
   await sendMessage({ channelId: state.channelId, embeds: [embed] });
@@ -101,21 +89,6 @@ function reasonText(verdict: Verdict): string {
     default:
       return "";
   }
-}
-
-/**
- * Short explainer for *why* this player is the MVP. Phrasing
- * tracks the verdict path so the ending field reads coherently
- * regardless of how the game ended.
- */
-function mvpReasonText(verdict: Verdict): string {
-  if (verdict.reason === "merlin-killed") {
-    return t(undefined, "stage.ending.mvpReasonAssassin");
-  }
-  if (verdict.winner === "mordred") {
-    return t(undefined, "stage.ending.mvpReasonFailVotes");
-  }
-  return t(undefined, "stage.ending.mvpReasonRedRejections");
 }
 
 /**
