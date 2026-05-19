@@ -1,15 +1,27 @@
 import { t } from "../i18n/index.js";
-import { type GameState, type Verdict } from "../game/state.js";
+import {
+  computeMvp,
+  factionOf,
+  type GameState,
+  type Player,
+  type Verdict,
+} from "../game/state.js";
 import { ROLES } from "../game/roles.js";
 import { removeGame } from "../game/store.js";
-import { sendMessage } from "./discord.js";
+import { findArt, findVariantArt, isVariantPosition } from "../art.js";
+import { sendMessage, type DiscordEmbed } from "./discord.js";
 import { FACTION_COLOR, missionProgressLine } from "./presentation.js";
+import { runtime } from "./runtime.js";
 import { clearNpcTimer } from "../npc/driver.js";
 
 /**
- * End-of-game board. Reveals every seat's role and the reason the
- * verdict landed where it did, then clears the in-memory state so a
- * fresh `/avalon start` can run in this channel.
+ * End-of-game board. Reveals every seat's role with a faction
+ * marker, names the reason the verdict landed where it did, and
+ * highlights the MVP — the "decisive figure" of the game — with
+ * their card face as the embed's main image.
+ *
+ * After posting, clears the in-memory state so a fresh
+ * `/avalon start` can run in this channel.
  */
 export async function endGame(state: GameState, verdict: Verdict): Promise<void> {
   state.stage = "ended";
@@ -17,38 +29,57 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
   state.current = null;
   const rosterLines = state.players.map((p) => {
     const role = t(undefined, ROLES[p.position].nameKey);
-    return `\`${p.index + 1}\` ${p.displayName} — **${role}**`;
+    return `\`${p.index + 1}\` ${factionMarker(p)} ${p.displayName} — **${role}**`;
   });
   const arthurWin = verdict.winner === "arthur";
-  await sendMessage({
-    channelId: state.channelId,
-    embeds: [
-      {
-        title: arthurWin
-          ? `🏆 ${t(undefined, "stage.ending.titleArthur")}`
-          : `🗡 ${t(undefined, "stage.ending.titleMordred")}`,
-        description: reasonText(verdict),
-        color: arthurWin ? FACTION_COLOR.arthur : FACTION_COLOR.mordred,
-        fields: [
-          {
-            name: t(undefined, "stage.board.fieldProgress"),
-            value: missionProgressLine(state),
-            inline: false,
-          },
-          {
-            name: t(undefined, "stage.ending.fieldRoster"),
-            value: rosterLines.join("\n"),
-            inline: false,
-          },
-        ],
-      },
-    ],
-  });
+
+  const mvp = computeMvp(state, verdict);
+  const mvpImage = mvp ? await resolveMvpImage(state, mvp) : undefined;
+
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    {
+      name: t(undefined, "stage.board.fieldProgress"),
+      value: missionProgressLine(state),
+      inline: false,
+    },
+    {
+      name: t(undefined, "stage.ending.fieldRoster"),
+      value: rosterLines.join("\n"),
+      inline: false,
+    },
+  ];
+  if (mvp) {
+    fields.push({
+      name: t(undefined, "stage.ending.fieldMvp"),
+      value: t(undefined, "stage.ending.mvpLine", {
+        marker: factionMarker(mvp),
+        name: mvp.displayName,
+        role: t(undefined, ROLES[mvp.position].nameKey),
+        reason: mvpReasonText(verdict),
+      }),
+      inline: false,
+    });
+  }
+
+  const embed: DiscordEmbed = {
+    title: arthurWin
+      ? `🏆 ${t(undefined, "stage.ending.titleArthur")}`
+      : `🗡 ${t(undefined, "stage.ending.titleMordred")}`,
+    description: reasonText(verdict),
+    color: arthurWin ? FACTION_COLOR.arthur : FACTION_COLOR.mordred,
+    fields,
+    ...(mvpImage ? { image: mvpImage } : {}),
+  };
+  await sendMessage({ channelId: state.channelId, embeds: [embed] });
   // The session is over; future `/avalon start` re-creates fresh
   // state. We keep the per-channel sign-up map separate (see
   // signup.ts) so its lifecycle isn't entangled.
   clearNpcTimer(state.channelId);
   removeGame(state.channelId);
+}
+
+function factionMarker(p: Player): string {
+  return factionOf(p) === "arthur" ? "🔵" : "🔴";
 }
 
 function reasonText(verdict: Verdict): string {
@@ -70,4 +101,52 @@ function reasonText(verdict: Verdict): string {
     default:
       return "";
   }
+}
+
+/**
+ * Short explainer for *why* this player is the MVP. Phrasing
+ * tracks the verdict path so the ending field reads coherently
+ * regardless of how the game ended.
+ */
+function mvpReasonText(verdict: Verdict): string {
+  if (verdict.reason === "merlin-killed") {
+    return t(undefined, "stage.ending.mvpReasonAssassin");
+  }
+  if (verdict.winner === "mordred") {
+    return t(undefined, "stage.ending.mvpReasonFailVotes");
+  }
+  return t(undefined, "stage.ending.mvpReasonRedRejections");
+}
+
+/**
+ * Resolve the MVP's card art URL. Uses the same art store as the
+ * deal-reveal ephemeral: variant positions (loyal / minion) pick
+ * the variant indexed by the MVP's seat-rank among same-role
+ * players; single-image positions go through `findArt`. Returns
+ * undefined when no art is uploaded for the MVP's slot — caller
+ * simply omits the embed image then.
+ */
+async function resolveMvpImage(
+  state: GameState,
+  mvp: Player,
+): Promise<{ url: string } | undefined> {
+  let art: { filename: string; etag: string } | null;
+  if (isVariantPosition(mvp.position)) {
+    // Inline seat-rank-among-same-role so we don't reach into
+    // stages.ts and create a circular import via stages-publicvote
+    // → stages-ending → stages → ...
+    const sameRole = state.players
+      .filter((p) => p.position === mvp.position)
+      .sort((a, b) => a.index - b.index);
+    const rankIdx = sameRole.findIndex((p) => p.userId === mvp.userId);
+    const rank = rankIdx === -1 ? 0 : rankIdx + 1;
+    if (rank === 0) return undefined;
+    art = await findVariantArt(mvp.position, rank).catch(() => null);
+  } else {
+    art = await findArt(mvp.position).catch(() => null);
+  }
+  if (!art) return undefined;
+  return {
+    url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}`,
+  };
 }

@@ -149,7 +149,11 @@ export async function renderDealReveal(
         inline: false,
       },
     ],
-    ...(thumbnail ? { thumbnail } : {}),
+    // Use `image` (full-width below the fields) instead of
+    // `thumbnail` (small top-right) so the role card reads as a
+    // proper card face. Falls back to no image when the admin
+    // hasn't uploaded art for this position / variant slot.
+    ...(thumbnail ? { image: thumbnail } : {}),
   };
 }
 

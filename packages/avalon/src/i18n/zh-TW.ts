@@ -182,6 +182,11 @@ export const zhTW = {
   "stage.ending.reasonFailures": "三次任務失敗。",
   "stage.ending.reasonRejections": "公開投票連續五次被否決，紅方獲勝。",
   "stage.ending.fieldRoster": "全員身份",
+  "stage.ending.fieldMvp": "MVP",
+  "stage.ending.mvpLine": "{marker} **{name}** — {role}　·　{reason}",
+  "stage.ending.mvpReasonAssassin": "刺殺成功，紅方反敗為勝",
+  "stage.ending.mvpReasonFailVotes": "投下最多失敗票",
+  "stage.ending.mvpReasonRedRejections": "拒絕最多含紅方的隊伍",
 
   "error.notInGuild": "此指令只能在伺服器中使用。",
   "error.alreadyRunning": "此頻道已有對局正在進行。",
