@@ -132,6 +132,10 @@ Test surfaces:
 | signup-006 | cap at 10 join                                           | 10 in roster; 11th tries to join                                 | ephemeral `stage.signup.tooMany`                                            | `signup.ts:137-143`  |
 | signup-007 | host cancel deletes signup + edits message               | host clicks `sig:cancel`                                          | signups Map empty; message edited to "已取消"                              | `signup.ts:229-254`  |
 | signup-008 | `/avalon stop` on signup-only state wipes signup         | signup live (no game yet); host runs `/avalon stop`              | reply `error.stopped`; signups empty; signup message left stale (BUGS B-002) | `plugin.ts:91-103`, `signup.ts:334-336` |
+| signup-009 | lady toggle below 7 players is rejected (B-003)          | 6-player signup; host clicks `sig:lady`                          | ephemeral `stage.signup.ladyNeeds7`; board NOT repainted                  | `signup.ts: handleLadyClick`, `flow-signup.test.ts` |
+| signup-010 | host toggles lady on then off at ≥7 (B-003)              | 7-player signup; two `sig:lady` clicks by host                   | each click repaints + ephemeral ladyOn / ladyOff                          | `signup.ts: handleLadyClick`, `flow-signup.test.ts` |
+| signup-011 | non-host lady click rejected (B-003)                     | non-host clicks `sig:lady`                                       | ephemeral `stage.signup.onlyHost`; no board repaint                       | `signup.ts: handleLadyClick`, `flow-signup.test.ts` |
+| signup-012 | leaving below 7 forces ladyEnabled back to false (B-003) | 7p toggle on → u6 leaves (n=6) → host clicks lady at 6           | second click ephemeral-rejects (ladyNeeds7); board not repainted          | `signup.ts: handleLeaveClick`, `flow-signup.test.ts` |
 
 ### F. Manage tokens (`manage-tokens.ts`)
 
@@ -167,6 +171,15 @@ Test surfaces:
 | art-017 | isVariantPosition flags loyal + minion only               | isVariantPosition for each Position                                     | true for loyal/minion; false for others         | `art.test.ts`     |
 | art-018 | maxVariantsForPosition returns 5 / 3 / 0                  | maxVariantsForPosition("loyal" / "minion" / "merlin")                   | 5 / 3 / 0                                       | `art.test.ts`     |
 | art-019 | isValidVariant clamps to 1..max + rejects non-integer     | various boundaries + NaN / Infinity / 1.5                               | true only for ints in 1..max for variant role   | `art.test.ts`     |
+| art-020 | saveAsset + findAsset + listAssets round-trip             | `saveAsset("lake", buf, "png")`; findAsset + listAssets                 | findAsset returns entry; listAssets includes it; listArt does NOT include it | `art-fs.test.ts` |
+| art-021 | saveAsset replaces prior extension for same key           | saveAsset("lake", …, "jpg") then ("lake", …, "png")                     | only lake.png remains                            | `art-fs.test.ts` |
+| art-022 | removeAsset true/false branches                           | removeAsset twice on lake                                                | first true, second false; findAsset null after  | `art-fs.test.ts` |
+| art-023 | listArt and listAssets are disjoint                       | mixed disk content (merlin.png + loyal-1.png + lake.png)                | listArt excludes lake; listAssets excludes role files | `art-fs.test.ts` |
+| art-024 | cleanupOrphanArt keeps a legitimate lake.<ext>            | upload lake.png; call cleanup                                            | removed=[]; findAsset still returns lake.png    | `art-fs.test.ts` |
+| art-025 | isValidAssetKey accepts known keys only                   | "lake" / "LAKE" / "throne" / ""                                          | true / false / false / false                     | `art.test.ts`    |
+| art-026 | isSafeArtFilename accepts asset filenames                  | lake.png / lake.jpg / lake.webp / lake.gif                               | true                                             | `art.test.ts`    |
+| art-027 | isSafeArtFilename rejects unknown asset keys              | throne.png / questCard.png                                                | false                                            | `art.test.ts`    |
+| art-028 | ASSET_KEYS exports just `lake`                             | spread ASSET_KEYS                                                        | ["lake"]                                         | `art.test.ts`    |
 
 ### H. Web routes (`web-routes.ts`) — integration via fastify.inject
 
@@ -190,6 +203,11 @@ Test surfaces:
 | web-016 | variant out-of-range rejected                              | POST `/api/manage/art/loyal/6`                        | 400 "Variant out of range"                              | `web-routes.ts:362-365` |
 | web-017 | variant delete happy path                                  | upload loyal-1; DELETE `/api/manage/art/loyal/1`     | 200 `{ ok: true }`; file gone                           | `web-routes.ts:378-397` |
 | web-018 | variant delete 404 when slot empty                         | DELETE `/api/manage/art/loyal/2` with nothing there  | 404 "No artwork stored for this slot"                   | `web-routes.ts:393-395` |
+| web-019 | asset upload happy path                                    | POST `/api/manage/asset/lake` multipart png          | 200 `{ assetKey, filename, url }`; lake.png on disk      | `web-routes.ts: /api/manage/asset/:key POST` |
+| web-020 | asset upload unknown key rejected                          | POST `/api/manage/asset/throne`                      | 400 "Unknown asset"                                      | `web-routes.ts: /api/manage/asset/:key POST` |
+| web-021 | asset delete happy path                                    | POST + DELETE `/api/manage/asset/lake`               | 200 `{ ok: true }`; file gone                            | `web-routes.ts: /api/manage/asset/:key DELETE` |
+| web-022 | asset delete 404 when nothing stored                       | DELETE `/api/manage/asset/lake` cold                 | 404 "No asset stored"                                    | `web-routes.ts: /api/manage/asset/:key DELETE` |
+| web-023 | GET /api/manage/art response shape carries `assets[]`     | upload lake + role art; GET /api/manage/art          | response body has both `art[]` (role) and `assets[]` arrays | `web-routes.ts: GET /api/manage/art` |
 
 ### I. Persistence & restart
 

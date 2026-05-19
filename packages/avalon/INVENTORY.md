@@ -255,11 +255,14 @@ per-role vision.
 - **Vision**: the holder gets the target's faction added to their personal
   view; that flows through `buildVision()` which checks
   `viewer.lakeTarget === p.userId` and overrides the role-based marker.
-- **Important UX-only fact**: the lady toggle is currently **hard-coded to
-  `ladyEnabled: false`** in `handleStartClick`. The lake code path
-  therefore never fires in production. See BUGS / the TODO comment in
-  `signup.ts:194`. The engine is wired and testable; only the UI dialog
-  is missing.
+- **Enabling the mechanic**: the host gates Lady-of-the-Lake at signup
+  time via the `sig:lady` toggle button on the signup board (only
+  visible when player count ≥ `LADY_MIN_PLAYERS` = 7). If the roster
+  drops below 7 after toggling on, `handleLeaveClick` auto-resets the
+  flag to `false`; `handleStartClick` additionally clamps the effective
+  value at deal time. The optional public-board + ephemeral-result
+  thumbnail comes from the `lake` admin-uploaded game-element asset
+  (see § Role art slot model).
 
 ### S7. assassinate  (`state.current.kind === "assassinate"`, `state.stage === "assassinate"`)
 
@@ -361,7 +364,7 @@ After assassinate: `settleAssassinate` returns
 
 ### Role art slot model
 
-The `art.ts` storage splits roles into two flavours:
+The `art.ts` storage splits uploaded images into three flavours:
 
 - **Single-image positions** — `merlin`, `percival`, `assassin`,
   `morgana`, `mordred`, `oberon`. Exactly one file per role,
@@ -374,6 +377,12 @@ The `art.ts` storage splits roles into two flavours:
   pulls the matching variant via `findVariantArt`. If the admin
   hasn't uploaded the variant for that rank, the embed omits the
   thumbnail (never reused — see B/A discussion below).
+- **Game-element assets** — non-role uploads addressed by key.
+  Current keys: `lake`. Filename: `<key>.<ext>` directly in
+  `ART_DIR`. The lake asset's image, if uploaded, attaches as a
+  thumbnail on the lake stage's public board AND the per-holder
+  ephemeral result. Asset keys live in `ASSET_KEYS`; new ones extend
+  that tuple + `ASSET_LIST` on the frontend.
 
 `Position` includes `minion` so the art slots have somewhere to
 attach, but `rolesForPlayerCount` doesn't currently put `minion`
@@ -387,10 +396,9 @@ the variant redesign.
 - **n=4 dead-on-arrival**: rulebook says 5–10 only; this codebase pretends
   to support 4 (mission table, signup minimum), but the deck-builder
   throws. Fix: bump the signup minimum to 5 (or implement 1-evil n=4).
-- **Lady-of-the-Lake unreachable**: rulebook makes Lady optional at game
-  setup; this codebase hard-codes `ladyEnabled: false` and the toggle UI
-  doesn't exist yet. The engine logic is complete — only the option
-  dialog before deal is missing.
+- **Lady-of-the-Lake now reachable (B-003 resolved)**: host enables it
+  via the `sig:lady` toggle on the signup board (visible when n≥7).
+  Optional thumbnail comes from the `lake` game-element asset.
 - **Assassinate target picker not faction-filtered**: assassin sees ALL
   non-self seats. Rulebook is silent on UI; intentionally not filtered to
   avoid leaking Oberon. UX-only quirk, not a rule bug.
@@ -431,11 +439,13 @@ Auth chain:
 - `POST /api/manage/refresh`       — rotate plugin refresh → fresh pair
 - `GET  /api/manage/games`         — admin list of active games + signups
 - `POST /api/manage/games/:channelId/stop` — admin force-stop
-- `GET  /api/manage/art`           — list uploaded art with cache-busting URLs
+- `GET  /api/manage/art`           — list uploaded art with cache-busting URLs. Response now carries both `art[]` (role entries) AND `assets[]` (game-element entries).
 - `POST /api/manage/art/:position` — multipart upload for single-image positions (merlin/percival/assassin/morgana/mordred/oberon); 5 MB cap, 4 mime types. Variant positions (loyal/minion) get 400 here.
 - `DELETE /api/manage/art/:position` — remove single-image art file(s). Variant positions get 400 here.
 - `POST /api/manage/art/:position/:variant` — multipart upload for variant slots; `:variant` is 1-indexed (loyal 1..5, minion 1..3). 5 MB cap, 4 mime types.
 - `DELETE /api/manage/art/:position/:variant` — remove a specific variant slot.
+- `POST /api/manage/asset/:key` — multipart upload for a non-role game-element asset slot. Current keys: `lake`. Same 5 MB / 4-mime guards.
+- `DELETE /api/manage/asset/:key` — remove a stored asset.
 
 Auth model:
 - `auth()`: bot-issued plugin-session JWT (Ed25519, 15 min); required for

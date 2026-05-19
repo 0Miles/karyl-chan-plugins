@@ -89,37 +89,46 @@ captured with `components: []`.
 
 ---
 
-## B-003 — Lady-of-the-Lake stage is unreachable from production  &nbsp;&nbsp;[MEDIUM, DEFERRED]
+## B-003 — Lady-of-the-Lake stage is unreachable from production  &nbsp;&nbsp;[MEDIUM, FIXED]
 
-**Repro**
+**Repro (historical)**
 ```
 1. /avalon start with 7+ players; host clicks 開始.
-2. handleStartClick (signup.ts:194) hard-codes ladyEnabled: false.
+2. handleStartClick (signup.ts:194) hard-coded ladyEnabled: false.
 3. The full lake stage code (stages-lake.ts, lakeIsDueAfterRound,
-   etc.) never runs.
+   etc.) never ran.
 ```
 
-**Actual** Engine has fully wired lake mechanics, vision overrides,
-i18n strings, and a `state.options.lady` family of keys — but the
-toggle UI doesn't exist, so production games never enable it.
+**Actual** Engine had fully wired lake mechanics, vision overrides
+and i18n strings — but the toggle UI didn't exist, so production
+games never enabled it.
 
 **Expected** A lady-of-the-lake toggle visible on the signup board
 when n>=7 (rule book says n>=7 only).
 
-**File/line** `src/flow/signup.ts:193-204` — the TODO comment is
-explicit ("TODO (next commit): show the lady-of-the-lake option
-dialog"). i18n already has `stage.options.title/lady/yes/no`.
+**Fix taken** Added a `sig:lady` toggle button on the signup board
+(commit `049574c`), visible when the roster crosses
+`LADY_MIN_PLAYERS = 7`. Button colour reflects state (green when on,
+grey when off). `handleLadyClick` flips `signup.ladyEnabled`;
+`handleStartClick` resolves the effective value at game-start time,
+forcing false if the roster dropped below threshold.
+`handleLeaveClick` also auto-resets the flag if a leave drops the
+roster below 7 (otherwise the toggle could persist as a stale `true`
+across a leave+rejoin cycle).
 
-**Fix proposal** Add an `options` sub-stage between signup-start and
-deal: another Discord message with two buttons (启用 / 不启用), gated
-by n>=7. New customId `kc:karyl-avalon:opt:lady-on / lady-off`. Then
-build GameState with the chosen ladyEnabled.
+The lake stage now also embeds an optional thumbnail from the new
+`lake` game-element asset (admin-uploaded via
+`POST /api/manage/asset/lake` — see `flow/stages-lake.ts`
+`lakeThumbnail()`).
 
-**Why deferred** Per the goal's "停下回報" rules, this is a new
-user-facing feature (new buttons, new flow step, new i18n surface
-that needs reviewer sign-off) rather than a bug fix. The engine is
-ready and the lake tests (`flow-lake.test.ts`, simulator scenarios 08,
-15) already cover the path it would expose. Flagged for follow-up.
+**File/line** `src/flow/signup.ts` `handleLadyClick`,
+`handleLeaveClick`, `handleStartClick`; `src/flow/stages-lake.ts`
+`openLake` + `handleLakeClick` thumbnail wiring.
+
+**Tests that catch it** `flow-signup.test.ts` —
+`describe("B-003: lady-of-the-lake toggle on signup")` covers
+under-threshold rejection, toggle on/off, non-host rejection, and
+the leave-resets-stale-true case.
 
 ---
 
