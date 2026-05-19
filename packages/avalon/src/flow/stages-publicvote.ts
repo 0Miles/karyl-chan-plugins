@@ -10,6 +10,7 @@ import {
   leader,
   playerByIndex,
   playerByUserId,
+  recordMvpRejection,
   rotateLeader,
   type GameState,
 } from "../game/state.js";
@@ -93,6 +94,9 @@ export async function handlePublicVoteClick(
   if (tail !== "y" && tail !== "n") return null;
   const vote: "yes" | "no" = tail === "y" ? "yes" : "no";
   game.current.votes[ctx.userId] = vote;
+  if (vote === "no") {
+    recordMvpRejection(game, me, game.current.missionMembers);
+  }
 
   await followupEphemeral({
     interactionToken: ctx.interactionToken,

@@ -9,6 +9,7 @@ import {
   currentMissionSize,
   leader,
   playerByIndex,
+  recordMvpProposal,
   type GameState,
 } from "../game/state.js";
 import { getGame } from "../game/store.js";
@@ -157,6 +158,7 @@ async function confirmAppoint(
     components: [],
   });
   const missionMembers = [...game.current.selected];
+  recordMvpProposal(game, leaderPlayer, missionMembers);
   await openPublicVote(game, missionMembers);
   return null;
 }

@@ -29,6 +29,8 @@ import {
   leader,
   playerByIndex,
   recordMissionResult,
+  recordMvpProposal,
+  recordMvpRejection,
   rotateLeader,
   settleAssassinate,
   type GameState,
@@ -249,6 +251,7 @@ async function performAppoint(state: GameState, npc: Player): Promise<void> {
     embeds: [renderAppointEmbed(state, npc.displayName, selectedNames)],
     components: [],
   });
+  recordMvpProposal(state, npc, chosen);
   const { openPublicVote } = await import("../flow/stages-publicvote.js");
   await openPublicVote(state, chosen);
 }
@@ -262,6 +265,9 @@ async function performPublicVote(state: GameState, npc: Player): Promise<void> {
     rng,
   );
   state.current.votes[npc.userId] = vote;
+  if (vote === "no") {
+    recordMvpRejection(state, npc, state.current.missionMembers);
+  }
   const { renderPublicVoteEmbed, publicVoteComponents, resolvePublicVote } =
     await import("../flow/stages-publicvote.js");
   await editMessage({

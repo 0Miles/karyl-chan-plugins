@@ -13,6 +13,7 @@ import {
   playerByIndex,
   playerByUserId,
   recordMissionResult,
+  recordMvpFails,
   rotateLeader,
   type GameState,
 } from "../game/state.js";
@@ -211,6 +212,9 @@ export async function resolvePrivateVote(game: GameState): Promise<void> {
   const passed = needs2 ? failCount < 2 : failCount < 1;
   const messageId = game.current.messageId;
   const missionMembers = game.current.missionMembers;
+  // Capture per-player fail-vote stats before we clear state.current
+  // — feeds the MVP picker on the ending board.
+  recordMvpFails(game, game.current.votes);
 
   // Reveal the resolved board (hide who voted what — only the
   // aggregate fail count is public, mirroring the original game).
