@@ -106,11 +106,9 @@ void art;
         <RoleArtTile
           v-for="variant in slotSequence(role.variantCount)"
           :key="variant ?? 'single'"
-          :position="role.position"
           :label="tileLabel(role.label, variant)"
           :faction="role.faction"
           :entry="entryFor(role.position, variant)"
-          :variant="variant"
           @upload="(file) => onTileUpload(role.position, variant, file)"
           @delete="deleteArt(role.position, { variant })"
         />
@@ -121,7 +119,6 @@ void art;
       v-if="cropTarget"
       :visible="cropVisible"
       :file="cropTarget.file"
-      :position="cropTarget.position"
       :position-label="cropTargetLabel()"
       @close="onCropClose"
       @confirm="onCropConfirm"

@@ -4,13 +4,15 @@ import Cropper from "cropperjs";
 import "cropperjs/dist/cropper.css";
 import AppButton from "./AppButton.vue";
 import AppModal from "./AppModal.vue";
-import type { RolePosition } from "../types";
 
 /**
- * Square-aspect cropper modal for role artwork.
+ * Square-aspect cropper modal for uploaded art (roles + game-element
+ * assets). The modal is content-agnostic — it just cares about the
+ * incoming `file` and the human label to put in its title. The
+ * parent decides which slot the resulting blob belongs to.
  *
  * Flow:
- *   1. Parent passes (visible=true, file, position).
+ *   1. Parent passes (visible=true, file, positionLabel).
  *   2. The watcher fires `objectURL = URL.createObjectURL(file)` and
  *      mounts Cropper.js on the <img>.
  *   3. User zooms / rotates / drags the selection. Aspect ratio is
@@ -31,7 +33,6 @@ import type { RolePosition } from "../types";
 const props = defineProps<{
   visible: boolean;
   file: File | null;
-  position: RolePosition;
   positionLabel: string;
 }>();
 

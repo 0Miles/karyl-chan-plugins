@@ -1,23 +1,32 @@
 import { computed, ref } from "vue";
 import { api, apiUpload } from "../api";
-import type { ArtResponse, RoleArtEntry, RolePosition } from "../types";
+import type {
+  ArtResponse,
+  AssetEntry,
+  AssetKey,
+  RoleArtEntry,
+  RolePosition,
+} from "../types";
 import { useToast } from "./use-toast";
 
 /**
- * Role-art list + upload/delete state, shared module-level so the
+ * Role-art + game-element-asset state, shared module-level so the
  * tab views read the same source of truth.
  *
- * The backend has two flavours of slots:
+ * The backend exposes three storage flavours:
  *  - Single-image positions (merlin, percival, assassin, morgana,
  *    mordred, oberon): one image, route `/api/manage/art/:position`.
  *  - Variant positions (loyal, minion): N images, route
  *    `/api/manage/art/:position/:variant` where variant is 1..N.
+ *  - Non-role assets (lake, …): one image per key, route
+ *    `/api/manage/asset/:key`.
  *
- * Uploads always go through uploadBlob — accepts a File or Blob so
- * the cropper modal can hand us either a fresh canvas blob or (less
- * commonly) the raw file.
+ * Uploads always go through uploadBlob/uploadAssetBlob — both accept
+ * a File or Blob so the cropper modal can hand us either a fresh
+ * canvas blob or (less commonly) the raw file.
  */
 const art = ref<RoleArtEntry[]>([]);
+const assets = ref<AssetEntry[]>([]);
 
 export type RoleFaction = "arthur" | "mordred";
 
@@ -60,9 +69,36 @@ const artByKey = computed<Record<string, RoleArtEntry | undefined>>(() => {
   return m;
 });
 
+/** Source of truth for the game-element side of the UI. */
+export interface AssetDef {
+  key: AssetKey;
+  label: string;
+  /** Optional descriptive line under the title. */
+  hint?: string;
+}
+
+export const ASSET_LIST: AssetDef[] = [
+  {
+    key: "lake",
+    label: "湖中女神",
+    hint: "n≥7 且主持人在報名時啟用時觸發；公開查驗版 + ephemeral 結果都會帶上這張縮圖。",
+  },
+];
+
+export function assetLabelOf(key: AssetKey): string {
+  return ASSET_LIST.find((a) => a.key === key)?.label ?? key;
+}
+
+const assetByKey = computed<Record<string, AssetEntry | undefined>>(() => {
+  const m: Record<string, AssetEntry | undefined> = {};
+  for (const a of assets.value) m[a.assetKey] = a;
+  return m;
+});
+
 async function refresh(): Promise<void> {
   const r = await api<ArtResponse>("GET", "/api/manage/art");
   art.value = r.art || [];
+  assets.value = r.assets || [];
 }
 
 export function useArt() {
@@ -155,14 +191,59 @@ export function useArt() {
     return def?.variantCount ?? 1;
   }
 
+  /** Upload to a non-role asset slot (e.g. lake). */
+  async function uploadAssetBlob(
+    key: AssetKey,
+    blob: Blob,
+  ): Promise<boolean> {
+    try {
+      const file =
+        blob instanceof File
+          ? blob
+          : new File([blob], `${key}.png`, {
+              type: blob.type || "image/png",
+            });
+      await apiUpload(`/api/manage/asset/${key}`, file);
+      await refresh();
+      toastOk(`已上傳 ${assetLabelOf(key)}`);
+      return true;
+    } catch (e: unknown) {
+      toastError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  }
+
+  async function deleteAsset(key: AssetKey): Promise<boolean> {
+    const label = assetLabelOf(key);
+    if (!window.confirm(`刪除「${label}」的圖像？`)) return false;
+    try {
+      await api("DELETE", `/api/manage/asset/${key}`);
+      await refresh();
+      toastOk(`已刪除 ${label}`);
+      return true;
+    } catch (e: unknown) {
+      toastError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  }
+
+  function entryForAsset(key: AssetKey): AssetEntry | undefined {
+    return assetByKey.value[key];
+  }
+
   return {
     art,
     artByKey,
+    assets,
+    assetByKey,
     refreshArt,
     uploadBlob,
     deleteArt,
     entryFor,
     filledCount,
     totalSlots,
+    uploadAssetBlob,
+    deleteAsset,
+    entryForAsset,
   };
 }

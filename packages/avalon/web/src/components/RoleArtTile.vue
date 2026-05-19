@@ -1,26 +1,27 @@
 <script setup lang="ts">
 import AppButton from "./AppButton.vue";
-import type { RoleArtEntry, RolePosition } from "../types";
+import type { AssetEntry, RoleArtEntry } from "../types";
 
 /**
- * Single art slot tile — used both for single-image roles and for each
- * variant of a variant role. Knows nothing about the role's role-defs;
- * the parent decides whether `variant` should be passed up on actions.
+ * Single art slot tile — reused for single-image roles, variant role
+ * sub-slots, and non-role game-element assets. Knows nothing about
+ * role-defs / asset-defs; the parent decides what to pass back on
+ * upload / delete events.
  *
  * Emits:
  *  - upload  → user clicked the upload label + chose a file
  *  - delete  → user clicked the delete button
  */
-const props = defineProps<{
-  position: RolePosition;
+defineProps<{
   /** Display label — for variant roles, parent appends "#N". */
   label: string;
-  /** Faction colour band — used for the top border. */
-  faction: "arthur" | "mordred";
+  /**
+   * Faction colour band — `arthur` / `mordred` paint the top border;
+   * `neutral` (used for non-role assets) leaves the top edge plain.
+   */
+  faction: "arthur" | "mordred" | "neutral";
   /** Backend entry for this slot, or undefined when empty. */
-  entry?: RoleArtEntry;
-  /** Optional slot index — present for variant roles, omitted for single. */
-  variant?: number;
+  entry?: RoleArtEntry | AssetEntry;
 }>();
 
 const emit = defineEmits<{
@@ -41,8 +42,6 @@ function fmtKb(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
-
-void props;
 </script>
 
 <template>

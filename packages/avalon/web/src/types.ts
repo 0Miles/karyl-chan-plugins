@@ -47,6 +47,17 @@ export interface RoleArtEntry {
   url: string;
 }
 
+/** Game-element assets — non-role uploaded art (e.g. Lake-of-the-Lady token). */
+export type AssetKey = "lake";
+
+export interface AssetEntry {
+  assetKey: AssetKey;
+  filename: string;
+  size: number;
+  url: string;
+}
+
 export interface ArtResponse {
   art: RoleArtEntry[];
+  assets: AssetEntry[];
 }
