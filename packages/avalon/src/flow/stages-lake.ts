@@ -63,16 +63,37 @@ export function lakeIsDueAfterRound(state: GameState, round: number): boolean {
   return round >= 2 && round <= 4;
 }
 
-export async function openLake(state: GameState): Promise<void> {
-  if (state.ladyHolderIndex === null) return;
+/**
+ * Build the lake stage's public board payload — embed (with the
+ * optional lake-asset thumbnail) + seat buttons + the matching
+ * attachment. Single source of truth for the active-lake board:
+ * `openLake` posts it, and `/avalon status` re-renders it. Returns
+ * null when there's no current Lady holder.
+ */
+export async function lakeBoardPayload(state: GameState): Promise<{
+  embeds: DiscordEmbed[];
+  components: DiscordActionRow[];
+  attachments?: DiscordAttachment[];
+} | null> {
+  if (state.ladyHolderIndex === null) return null;
   const holder = playerByIndex(state, state.ladyHolderIndex);
-  if (!holder) return;
+  if (!holder) return null;
   const lakeArt = await lakeThumbnail();
-  const sent = await sendMessage({
-    channelId: state.channelId,
+  return {
     embeds: [withThumbnail(renderLakeEmbed(state, holder.displayName), lakeArt)],
     components: lakeComponents(state),
     ...(lakeArt ? { attachments: [lakeArt.attachment] } : {}),
+  };
+}
+
+export async function openLake(state: GameState): Promise<void> {
+  if (state.ladyHolderIndex === null) return;
+  const holderIndex = state.ladyHolderIndex;
+  const payload = await lakeBoardPayload(state);
+  if (!payload) return;
+  const sent = await sendMessage({
+    channelId: state.channelId,
+    ...payload,
   });
   if (!sent) {
     runtime().log.error("avalon: failed to open lake stage", {
@@ -85,7 +106,7 @@ export async function openLake(state: GameState): Promise<void> {
   state.current = {
     kind: "lake",
     messageId: sent.id,
-    holderIndex: state.ladyHolderIndex,
+    holderIndex,
   };
   scheduleNpcStep(state);
 }

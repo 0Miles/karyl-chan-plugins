@@ -16,8 +16,10 @@ import { onComponent } from "./flow/dispatcher.js";
 import { clearCurrentStageButtons } from "./flow/stop.js";
 import {
   dealRevealComponents,
+  renderCurrentStageBoard,
   renderDealReveal,
 } from "./flow/stages.js";
+import { deleteMessage, sendMessage } from "./flow/discord.js";
 import { playerByUserId } from "./game/state.js";
 import { getGame, removeGame, withChannelLock } from "./game/store.js";
 import { cleanupOrphanArt } from "./art.js";
@@ -117,6 +119,22 @@ export function buildPlugin() {
               },
               {
                 type: "sub_command",
+                name: "status",
+                description: t(undefined, "command.avalon.status.description"),
+                options: [
+                  {
+                    type: "boolean",
+                    name: "public",
+                    description: t(
+                      undefined,
+                      "command.avalon.status.publicOption",
+                    ),
+                    required: false,
+                  },
+                ],
+              },
+              {
+                type: "sub_command",
                 name: "manage",
                 description: t(undefined, "command.avalon.manage.description"),
               },
@@ -180,6 +198,95 @@ export function buildPlugin() {
                     ? { attachments: [reveal.attachment] }
                     : {}),
                 };
+              }
+              if (sub === "status") {
+                // Re-surface the current stage's board so players
+                // don't have to scroll the channel back past a text
+                // discussion to find it. Default: a private
+                // (ephemeral) copy. `public:true` (host/admin only)
+                // deletes the stale public board and re-posts a
+                // fresh one at the bottom of the channel.
+                return withChannelLock(channelId, async () => {
+                  const game = getGame(channelId);
+                  if (!game || !game.current) {
+                    return {
+                      content: t(undefined, "error.notRunning"),
+                      ephemeral: true,
+                    };
+                  }
+                  const wantsPublic = ctx.options.public === true;
+                  // Gate before rendering: public is host/admin-only,
+                  // the private copy is for seated players. The whole
+                  // handler runs under withChannelLock, which also
+                  // serialises every component click + NPC tick on
+                  // this channel — so `game.current` can't be cleared
+                  // out from under us across the awaits below.
+                  if (wantsPublic) {
+                    if (
+                      game.hostUserId !== ctx.userId &&
+                      !ctx.hasCapability?.("admin")
+                    ) {
+                      return {
+                        content: t(undefined, "status.publicOnlyHost"),
+                        ephemeral: true,
+                      };
+                    }
+                  } else if (!playerByUserId(game, ctx.userId)) {
+                    return {
+                      content: t(undefined, "stage.deal.notInGame"),
+                      ephemeral: true,
+                    };
+                  }
+                  const board = await renderCurrentStageBoard(game);
+                  if (!board) {
+                    return {
+                      content: t(undefined, "error.notRunning"),
+                      ephemeral: true,
+                    };
+                  }
+                  if (wantsPublic) {
+                    // Drop the stale public board, re-post a fresh
+                    // one, and re-point state.current at it so every
+                    // later edit / click lands on the new message.
+                    await deleteMessage({
+                      channelId,
+                      messageId: game.current.messageId,
+                    });
+                    const sent = await sendMessage({
+                      channelId,
+                      embeds: board.embeds,
+                      components: board.components,
+                      ...(board.attachments
+                        ? { attachments: board.attachments }
+                        : {}),
+                    });
+                    if (!sent) {
+                      // The old board is already gone; the re-post
+                      // failed (RPC blip). Don't claim success —
+                      // re-running the command retries cleanly.
+                      return {
+                        content: t(undefined, "status.refreshFailed"),
+                        ephemeral: true,
+                      };
+                    }
+                    game.current.messageId = sent.id;
+                    return {
+                      content: t(undefined, "status.refreshed"),
+                      ephemeral: true,
+                    };
+                  }
+                  // Default: a private copy. Buttons still work — a
+                  // click drives the public board — but this copy
+                  // won't repaint, so it's a snapshot, not a live view.
+                  return {
+                    embeds: board.embeds,
+                    components: board.components,
+                    ephemeral: true,
+                    ...(board.attachments
+                      ? { attachments: board.attachments }
+                      : {}),
+                  };
+                });
               }
               if (sub === "manage") {
                 // 15-min bot JWT — only used to bootstrap a plugin-side

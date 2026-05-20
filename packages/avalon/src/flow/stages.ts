@@ -5,7 +5,13 @@ import {
 } from "@karyl-chan/plugin-sdk";
 import { EMBED_COLOR, PLUGIN_KEY } from "../constants.js";
 import { t } from "../i18n/index.js";
-import { playerByUserId, type GameState, type Player } from "../game/state.js";
+import {
+  leader,
+  playerByIndex,
+  playerByUserId,
+  type GameState,
+  type Player,
+} from "../game/state.js";
 import { ROLES, type Position } from "../game/roles.js";
 import { buildVision } from "../game/vision.js";
 import { getGame } from "../game/store.js";
@@ -15,9 +21,27 @@ import {
   sendMessage,
   type DiscordActionRow,
   type DiscordAttachment,
+  type DiscordEmbed,
 } from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
-import { openAppoint } from "./stages-appoint.js";
+import {
+  openAppoint,
+  renderAppointEmbed,
+  appointComponents,
+} from "./stages-appoint.js";
+import {
+  renderPublicVoteEmbed,
+  publicVoteComponents,
+} from "./stages-publicvote.js";
+import {
+  renderPrivateVoteEmbed,
+  privateVoteComponents,
+} from "./stages-privatevote.js";
+import { lakeBoardPayload } from "./stages-lake.js";
+import {
+  renderAssassinateEmbed,
+  assassinateComponents,
+} from "./stages-assassinate.js";
 import { findArt, findVariantArt, isVariantPosition } from "../art.js";
 import { runtime } from "./runtime.js";
 
@@ -271,6 +295,66 @@ function markerLegendLines(position: Position): string[] {
   }
   lines.push(`${markerEmoji("unknown")} ${t(undefined, "marker.unknown")}`);
   return lines;
+}
+
+/**
+ * The full message payload of the current stage's public board —
+ * embed(s), buttons, and any attachment — rebuilt from live game
+ * state. Used by `/avalon status` to re-surface the board (privately
+ * or, with `public`, as a fresh public post) without the players
+ * scrolling the channel for it.
+ *
+ * Returns null when there's no active stage (no game, or a stage
+ * opener that failed and left `state.current` null).
+ */
+export async function renderCurrentStageBoard(state: GameState): Promise<{
+  embeds: DiscordEmbed[];
+  components: DiscordActionRow[];
+  attachments?: DiscordAttachment[];
+} | null> {
+  const cur = state.current;
+  if (!cur) return null;
+  switch (cur.kind) {
+    case "appoint": {
+      const selectedNames = cur.selected.map(
+        (s) => playerByIndex(state, s)?.displayName ?? `#${s + 1}`,
+      );
+      return {
+        embeds: [
+          renderAppointEmbed(state, leader(state).displayName, selectedNames),
+        ],
+        components: appointComponents(state, cur.selected),
+      };
+    }
+    case "publicVote":
+      return {
+        embeds: [
+          renderPublicVoteEmbed(state, cur.missionMembers, cur.votes),
+        ],
+        components: publicVoteComponents(),
+      };
+    case "privateVote":
+      return {
+        embeds: [
+          renderPrivateVoteEmbed(
+            state,
+            cur.missionMembers,
+            Object.keys(cur.votes).length,
+          ),
+        ],
+        components: privateVoteComponents(),
+      };
+    case "lake":
+      return lakeBoardPayload(state);
+    case "assassinate": {
+      const assassin = state.players.find((p) => p.position === "assassin");
+      if (!assassin) return null;
+      return {
+        embeds: [renderAssassinateEmbed(assassin.displayName)],
+        components: assassinateComponents(state),
+      };
+    }
+  }
 }
 
 // Per-stage handlers live in sibling modules so this file stays

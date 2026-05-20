@@ -13,6 +13,13 @@ export const zhTW = {
   "command.avalon.start.description": "在此頻道開始一場新對局",
   "command.avalon.start.npcOption": "預先加入的 NPC 數量（0–9，可選；用來湊人數）",
   "command.avalon.card.description": "再次查看你的角色卡與視野",
+  "command.avalon.status.description":
+    "重新取得當前階段的遊戲板（含按鈕），免去往上翻對話記錄",
+  "command.avalon.status.publicOption":
+    "改以公開訊息重發遊戲板（限主持人/管理員，預設關閉）",
+  "status.refreshed": "已重新發佈當前階段的遊戲板。",
+  "status.refreshFailed": "⚠ 重發遊戲板失敗，請稍後再試。",
+  "status.publicOnlyHost": "只有發起人或管理員可以公開重發遊戲板。",
   "stage.board.viewCard": "🪪 查看角色卡",
   "command.avalon.stop.description": "強制終止此頻道進行中的對局",
   "command.avalon.manage.description": "取得阿瓦隆管理 WebUI 的一次性連結",

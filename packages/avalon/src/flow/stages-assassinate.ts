@@ -105,7 +105,7 @@ export async function handleAssassinateClick(
 
 // ── rendering ──────────────────────────────────────────────────────────
 
-function renderAssassinateEmbed(assassinName: string) {
+export function renderAssassinateEmbed(assassinName: string) {
   return {
     title: t(undefined, "stage.assassinate.title"),
     description: t(undefined, "stage.assassinate.content", {
@@ -115,7 +115,7 @@ function renderAssassinateEmbed(assassinName: string) {
   };
 }
 
-function assassinateComponents(state: GameState): DiscordActionRow[] {
+export function assassinateComponents(state: GameState): DiscordActionRow[] {
   // Show every non-assassin seat. We deliberately don't pre-filter
   // out the assassin's own faction here — doing so would leak Oberon
   // (who's evil but invisible to other evil) to the assassin.
