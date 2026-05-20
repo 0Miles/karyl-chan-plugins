@@ -22,7 +22,6 @@ import {
   editMessage,
   followupEphemeral,
   sendMessage,
-  toastEphemeral,
   type DiscordActionRow,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
@@ -81,13 +80,8 @@ export async function handlePrivateVoteClick(
   tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
-  if (!game || game.current?.kind !== "privateVote") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // Stale-board click — drop silently (deferUpdate already ack'd it).
+  if (!game || game.current?.kind !== "privateVote") return null;
   if (tail === "open") {
     return handlePrivateOpen(ctx, game);
   }
@@ -103,20 +97,10 @@ async function handlePrivateOpen(
 ): Promise<ComponentReply> {
   if (game.current?.kind !== "privateVote") return null;
   const me = playerByUserId(game, ctx.userId);
-  if (!me || !game.current.missionMembers.includes(me.index)) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.privateVote.notMember"),
-    });
-    return null;
-  }
-  if (game.current.votes[ctx.userId]) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.privateVote.alreadyVoted"),
-    });
-    return null;
-  }
+  // Non-member / already-voted taps on the public "前往投票" button
+  // are no-ops — drop silently rather than nag.
+  if (!me || !game.current.missionMembers.includes(me.index)) return null;
+  if (game.current.votes[ctx.userId]) return null;
   const isEvil = factionOf(me) === "mordred";
   const row: DiscordActionRow = {
     type: 1,
@@ -151,38 +135,15 @@ async function handlePrivateBallot(
 ): Promise<ComponentReply> {
   if (game.current?.kind !== "privateVote") return null;
   const me = playerByUserId(game, ctx.userId);
-  if (!me || !game.current.missionMembers.includes(me.index)) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.privateVote.notMember"),
-    });
-    return null;
-  }
-  if (game.current.votes[ctx.userId]) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.privateVote.alreadyVoted"),
-    });
-    return null;
-  }
+  // Non-member / already-voted ballots are no-ops — drop silently.
+  if (!me || !game.current.missionMembers.includes(me.index)) return null;
+  if (game.current.votes[ctx.userId]) return null;
   // Defence in depth — the success button is disabled for evil only
   // *visually*; reject a fail vote from a non-evil player at the
-  // engine boundary too.
-  if (ballot === "fail" && factionOf(me) === "arthur") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.privateVote.evilOnly"),
-    });
-    return null;
-  }
+  // engine boundary too (silently — the ❎ button is already
+  // disabled for them so this shouldn't be reachable).
+  if (ballot === "fail" && factionOf(me) === "arthur") return null;
   game.current.votes[ctx.userId] = ballot;
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content:
-      ballot === "success"
-        ? t(undefined, "stage.privateVote.recordedSuccess")
-        : t(undefined, "stage.privateVote.recordedFail"),
-  });
   // Repaint the public board's "n/N voted" line. Vote contents stay
   // hidden until everyone's in.
   await editMessage({

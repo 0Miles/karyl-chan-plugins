@@ -1,6 +1,6 @@
 import type { ComponentContext, ComponentReply } from "@karyl-chan/plugin-sdk";
 import { withChannelLock } from "../game/store.js";
-import { toastEphemeral } from "./discord.js";
+import { followupEphemeral } from "./discord.js";
 import { runtime } from "./runtime.js";
 import {
   handleSignupClick,
@@ -76,11 +76,17 @@ export async function onComponent(
   }
 }
 
+/**
+ * Surface a genuine handler failure (a thrown exception, or a
+ * missing channel context) to the clicker. Reserved for real errors
+ * — routine "invalid click" cases are dropped silently by the stage
+ * handlers, not routed here.
+ */
 async function safeEphemeral(
   ctx: ComponentContext,
   content: string,
 ): Promise<void> {
-  await toastEphemeral({
+  await followupEphemeral({
     interactionToken: ctx.interactionToken,
     content,
   }).catch(() => {});

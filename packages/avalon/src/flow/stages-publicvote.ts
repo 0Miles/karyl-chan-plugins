@@ -18,7 +18,6 @@ import { getGame } from "../game/store.js";
 import {
   editMessage,
   sendMessage,
-  toastEphemeral,
   type DiscordActionRow,
 } from "./discord.js";
 import { openAppoint } from "./stages-appoint.js";
@@ -69,44 +68,19 @@ export async function handlePublicVoteClick(
   tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
-  if (!game || game.current?.kind !== "publicVote") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // Invalid clicks (stale board, non-player, double-vote) are dropped
+  // silently — the interaction was already ack'd by deferUpdate, and
+  // a per-click ephemeral nag disrupts play more than it helps.
+  if (!game || game.current?.kind !== "publicVote") return null;
   const me = playerByUserId(game, ctx.userId);
-  if (!me) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.publicVote.notPlayer"),
-    });
-    return null;
-  }
-  if (game.current.votes[ctx.userId]) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.publicVote.alreadyVoted"),
-    });
-    return null;
-  }
+  if (!me) return null;
+  if (game.current.votes[ctx.userId]) return null;
   if (tail !== "y" && tail !== "n") return null;
   const vote: "yes" | "no" = tail === "y" ? "yes" : "no";
   game.current.votes[ctx.userId] = vote;
   if (vote === "no") {
     recordMvpRejection(game, me, game.current.missionMembers);
   }
-
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: t(undefined, "stage.publicVote.recorded", {
-      vote:
-        vote === "yes"
-          ? t(undefined, "stage.publicVote.approve")
-          : t(undefined, "stage.publicVote.reject"),
-    }),
-  });
 
   // Live progress repaint — show vote count only, not who-voted-what.
   await editMessage({

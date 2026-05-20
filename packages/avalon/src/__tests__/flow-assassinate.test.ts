@@ -53,11 +53,12 @@ describe("flow-021: non-assassin assassinate click is rejected", () => {
     await openAssassinate(game);
     harness.resetCalls();
     await click({ channelId: "c-asn-nonasn", userId: "u3", componentId: "asn", tail: "0" });
-    // Game still exists and still in assassinate.
+    // Non-assassin click is a silent no-op — game still in assassinate,
+    // no ephemeral nag.
     const post = getGame("c-asn-nonasn");
     expect(post?.stage).toBe("assassinate");
     expect(post?.current?.kind).toBe("assassinate");
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 

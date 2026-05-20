@@ -71,10 +71,6 @@ export function buildPlugin() {
       "messages.delete",
       "interactions.respond",
       "interactions.followup",
-      // Auto-dismisses toast ephemerals (vote-recorded nudges, "not
-      // your turn" rejections, etc.) after a short TTL —
-      // messages.delete doesn't work on ephemeral followups.
-      "interactions.delete_followup",
       // The admin WebUI requires this to mint plugin-session JWTs.
       "auth.session",
     ],

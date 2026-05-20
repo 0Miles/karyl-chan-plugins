@@ -15,7 +15,6 @@ import {
 import { getGame } from "../game/store.js";
 import {
   editMessage,
-  toastEphemeral,
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
@@ -72,21 +71,12 @@ export async function handleAppointClick(
   tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
-  if (!game || game.current?.kind !== "appoint") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // Invalid clicks (stale board, non-leader) are dropped silently —
+  // deferUpdate already ack'd the interaction; a per-click ephemeral
+  // nag disrupts play more than it helps.
+  if (!game || game.current?.kind !== "appoint") return null;
   const leaderPlayer = leader(game);
-  if (ctx.userId !== leaderPlayer.userId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.appoint.notLeader"),
-    });
-    return null;
-  }
+  if (ctx.userId !== leaderPlayer.userId) return null;
   // tail shape: `s:<seat>` to toggle, `c` to confirm.
   if (tail === "c") {
     return confirmAppoint(ctx, game);
@@ -112,13 +102,9 @@ async function toggleAppoint(
   if (idx >= 0) {
     selected.splice(idx, 1);
   } else {
-    if (selected.length >= num) {
-      await toastEphemeral({
-        interactionToken: ctx.interactionToken,
-        content: t(undefined, "stage.appoint.full"),
-      });
-      return null;
-    }
+    // At capacity — ignore the extra tap silently (the board already
+    // shows the full roster + a disabled-looking state).
+    if (selected.length >= num) return null;
     selected.push(seat);
   }
   // Edit the appoint board in place. Returning the new payload from
@@ -142,13 +128,10 @@ async function confirmAppoint(
 ): Promise<ComponentReply> {
   if (game.current?.kind !== "appoint") return null;
   const num = currentMissionSize(game);
-  if (game.current.selected.length !== num) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.appoint.needExact", { num }),
-    });
-    return null;
-  }
+  // The confirm button is disabled until exactly `num` seats are
+  // picked, so a wrong-count confirm shouldn't be reachable — drop
+  // it silently if it somehow arrives.
+  if (game.current.selected.length !== num) return null;
   // Lock the appoint board (strip buttons, leave the embed for
   // scrollback) and open the public-vote board.
   const leaderPlayer = leader(game);

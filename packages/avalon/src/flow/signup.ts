@@ -19,7 +19,7 @@ import {
   newGameState,
   type GameState,
 } from "../game/state.js";
-import { editMessage, sendMessage, toastEphemeral } from "./discord.js";
+import { editMessage, sendMessage } from "./discord.js";
 import { renderDealReveal, sendDealBoard } from "./stages.js";
 import { sampleNpcDisplayNames } from "../npc/names.js";
 
@@ -180,13 +180,8 @@ export async function handleSignupClick(
 ): Promise<ComponentReply> {
   const channelId = ctx.channelId!;
   const signup = signups.get(channelId);
-  if (!signup) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // Stale signup board — drop the click silently.
+  if (!signup) return null;
   switch (action) {
     case "join":
       return handleJoinClick(ctx, signup);
@@ -216,20 +211,10 @@ async function handleNpcAddClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (ctx.userId !== signup.hostUserId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.onlyHost"),
-    });
-    return null;
-  }
-  if (signup.players.size + signup.npcs.length >= MAX_PLAYERS) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.npcAtMax"),
-    });
-    return null;
-  }
+  // Non-host clicks and at-cap clicks are no-ops — drop silently
+  // (the button is rendered disabled at cap anyway).
+  if (ctx.userId !== signup.hostUserId) return null;
+  if (signup.players.size + signup.npcs.length >= MAX_PLAYERS) return null;
   const taken = new Set<string>([
     ...signup.players.values(),
     ...signup.npcs.map((n) => n.displayName),
@@ -241,10 +226,6 @@ async function handleNpcAddClick(
     displayName: name,
   });
   await refreshSignupMessage(signup.channelId);
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: t(undefined, "stage.signup.npcAdded", { name }),
-  });
   return null;
 }
 
@@ -252,20 +233,10 @@ async function handleNpcRemoveClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (ctx.userId !== signup.hostUserId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.onlyHost"),
-    });
-    return null;
-  }
-  if (signup.npcs.length === 0) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.npcAtMin"),
-    });
-    return null;
-  }
+  // Non-host clicks and no-NPC clicks are no-ops — drop silently
+  // (the button is rendered disabled when there are no NPCs).
+  if (ctx.userId !== signup.hostUserId) return null;
+  if (signup.npcs.length === 0) return null;
   signup.npcs.pop();
   // Mirror handleLeaveClick: if the roster drops below the lady
   // threshold, clear the toggle so a re-add doesn't silently inherit
@@ -274,10 +245,6 @@ async function handleNpcRemoveClick(
     signup.ladyEnabled = false;
   }
   await refreshSignupMessage(signup.channelId);
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: t(undefined, "stage.signup.npcRemoved"),
-  });
   return null;
 }
 
@@ -291,28 +258,14 @@ async function handleLadyClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (ctx.userId !== signup.hostUserId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.onlyHost"),
-    });
-    return null;
-  }
+  // Non-host clicks and under-quota clicks are no-ops — drop silently
+  // (the toggle button only renders at all once the roster hits 7).
+  if (ctx.userId !== signup.hostUserId) return null;
   if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.ladyNeeds7"),
-    });
     return null;
   }
   signup.ladyEnabled = !signup.ladyEnabled;
   await refreshSignupMessage(signup.channelId);
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: signup.ladyEnabled
-      ? t(undefined, "stage.signup.ladyOn")
-      : t(undefined, "stage.signup.ladyOff"),
-  });
   return null;
 }
 
@@ -320,39 +273,21 @@ async function handleJoinClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (signup.players.has(ctx.userId)) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.alreadyJoined"),
-    });
-    return null;
-  }
-  let evictedNpc = false;
+  // Already joined → no-op. The roster repaint is the feedback.
+  if (signup.players.has(ctx.userId)) return null;
   if (signup.players.size + signup.npcs.length >= MAX_PLAYERS) {
     // A human joining at cap evicts the last-seeded NPC so
     // /avalon start npc:9 doesn't render the roster unjoinable for
-    // every other human. Communicate the eviction to the joiner so
-    // the count change doesn't look like a phantom seat.
+    // every other human. If there's no NPC to evict, the roster is
+    // genuinely full — drop the click silently.
     if (signup.npcs.length > 0) {
       signup.npcs.pop();
-      evictedNpc = true;
     } else {
-      await toastEphemeral({
-        interactionToken: ctx.interactionToken,
-        content: t(undefined, "stage.signup.tooMany"),
-      });
       return null;
     }
   }
   signup.players.set(ctx.userId, ctx.userDisplayName);
   await refreshSignupMessage(signup.channelId);
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: t(
-      undefined,
-      evictedNpc ? "stage.signup.joinedEvictedNpc" : "stage.signup.joined",
-    ),
-  });
   return null;
 }
 
@@ -360,13 +295,8 @@ async function handleLeaveClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (!signup.players.has(ctx.userId)) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.notInList"),
-    });
-    return null;
-  }
+  // Not on the roster → no-op.
+  if (!signup.players.has(ctx.userId)) return null;
   // The host can leave the roster but the session stays under their
   // control — they still own the start / cancel buttons.
   signup.players.delete(ctx.userId);
@@ -379,10 +309,6 @@ async function handleLeaveClick(
     signup.ladyEnabled = false;
   }
   await refreshSignupMessage(signup.channelId);
-  await toastEphemeral({
-    interactionToken: ctx.interactionToken,
-    content: t(undefined, "stage.signup.left"),
-  });
   return null;
 }
 
@@ -390,21 +316,12 @@ async function handleStartClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (ctx.userId !== signup.hostUserId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.onlyHost"),
-    });
-    return null;
-  }
+  // Non-host start, or start below the minimum, are no-ops — the
+  // Start button is host-rendered and disabled below MIN_PLAYERS, so
+  // these shouldn't be reachable; drop them silently if they arrive.
+  if (ctx.userId !== signup.hostUserId) return null;
   const totalSize = signup.players.size + signup.npcs.length;
-  if (totalSize < MIN_PLAYERS) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.notEnough"),
-    });
-    return null;
-  }
+  if (totalSize < MIN_PLAYERS) return null;
   // B-003: Lady-of-the-Lake toggle is now exposed via the `sig:lady`
   // button on the signup board. Effective value is gated by
   // LADY_MIN_PLAYERS — a stale `true` on a roster that dropped below
@@ -454,13 +371,8 @@ async function handleCancelClick(
   ctx: ComponentContext,
   signup: Signup,
 ): Promise<ComponentReply> {
-  if (ctx.userId !== signup.hostUserId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.signup.onlyHost"),
-    });
-    return null;
-  }
+  // Only the host can cancel — non-host clicks are no-ops.
+  if (ctx.userId !== signup.hostUserId) return null;
   signups.delete(signup.channelId);
   await editMessage({
     channelId: signup.channelId,

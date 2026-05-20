@@ -13,7 +13,6 @@ import {
   artAttachment,
   followupEphemeral,
   sendMessage,
-  toastEphemeral,
   type DiscordActionRow,
   type DiscordAttachment,
 } from "./discord.js";
@@ -167,21 +166,11 @@ export async function handleDealClick(
   tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
-  if (!game) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // No game / not a seated player → nothing to reveal; drop silently
+  // (a spectator tapping the card button just gets no card).
+  if (!game) return null;
   const viewer = playerByUserId(game, ctx.userId);
-  if (!viewer) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.deal.notInGame"),
-    });
-    return null;
-  }
+  if (!viewer) return null;
   // tail === "help" — secondary ephemeral: a deeper role explanation
   // + the marker legend the viewer actually sees. Fired by the
   // "查看角色說明" button on the identity ephemeral.
@@ -195,13 +184,7 @@ export async function handleDealClick(
   // Default tail — render the identity ephemeral with the
   // "查看角色說明" follow-up button so the viewer can drill in.
   const reveal = await renderDealReveal(game, ctx.userId);
-  if (!reveal) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.deal.notInGame"),
-    });
-    return null;
-  }
+  if (!reveal) return null;
   await followupEphemeral({
     interactionToken: ctx.interactionToken,
     embeds: [reveal.embed],

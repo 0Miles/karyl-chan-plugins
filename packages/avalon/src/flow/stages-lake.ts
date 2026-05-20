@@ -17,7 +17,6 @@ import { getGame } from "../game/store.js";
 import {
   editMessage,
   followupEphemeral,
-  toastEphemeral,
   sendMessage,
   type DiscordActionRow,
   type DiscordAttachment,
@@ -104,41 +103,20 @@ export async function handleLakeClick(
   tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
-  if (!game || game.current?.kind !== "lake") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // Invalid clicks (stale board, non-holder, self, already-inspected
+  // target) are dropped silently — the seat buttons already disable
+  // illegal targets, and a per-click ephemeral nag disrupts play.
+  if (!game || game.current?.kind !== "lake") return null;
   const holder = playerByIndex(game, game.current.holderIndex);
-  if (!holder || ctx.userId !== holder.userId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.lake.notHolder"),
-    });
-    return null;
-  }
+  if (!holder || ctx.userId !== holder.userId) return null;
   const seat = Number(tail);
   if (!Number.isFinite(seat)) return null;
   const target = playerByIndex(game, seat);
   if (!target) return null;
-  if (target.userId === holder.userId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.lake.cannotSelf"),
-    });
-    return null;
-  }
+  if (target.userId === holder.userId) return null;
   // Disallow re-inspecting a previous holder (encoded as a marker on
   // Player when the token last moved off them).
-  if (target.lakeTarget !== null) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.lake.cannotRepeat"),
-    });
-    return null;
-  }
+  if (target.lakeTarget !== null) return null;
 
   // Reveal result only to the holder via an ephemeral. Keep the
   // public board's text neutral ("X 用湖中女神查驗了 Y") so

@@ -94,7 +94,7 @@ async function buildSignupWith(playerCount: number): Promise<void> {
 }
 
 describe("B-001: signup minimum bumped to 5; 4 players should reject at signup", () => {
-  it("4-player signup → host clicks start → ephemeral notEnough, no game in store", async () => {
+  it("4-player signup → host clicks start → no deal board, no game", async () => {
     await buildSignupWith(4);
     harness.resetCalls();
     await handleSignupClick(
@@ -106,12 +106,8 @@ describe("B-001: signup minimum bumped to 5; 4 players should reject at signup",
       }),
       "start",
     );
-    // No messages.send happened for a deal board.
-    const sends = harness.callsTo("messages.send");
-    expect(sends.length).toBe(0);
-    // An ephemeral nudge fired (the notEnough notice).
-    const followups = harness.callsTo("interactions.followup");
-    expect(followups.length).toBeGreaterThan(0);
+    // Below the minimum — start is a silent no-op: no deal board sent.
+    expect(harness.callsTo("messages.send").length).toBe(0);
   });
 });
 
@@ -147,8 +143,8 @@ describe("B-003: lady-of-the-lake toggle on signup", () => {
       }),
       "lady",
     );
-    // ephemeral fires (ladyNeeds7); no message.edit on the board.
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    // Under threshold — silent no-op: no board repaint.
+    expect(harness.callsTo("messages.edit").length).toBe(0);
   });
   it("7-player signup: host toggles lady on, then off", async () => {
     await buildSignupWith(7);
@@ -162,9 +158,10 @@ describe("B-003: lady-of-the-lake toggle on signup", () => {
       }),
       "lady",
     );
-    // Board repainted (lady state) + ephemeral confirm.
+    // Board repainted to show the new lady state.
     expect(harness.callsTo("messages.edit").length).toBeGreaterThan(0);
-    // Toggle off
+    harness.resetCalls();
+    // Toggle off → board repaints again.
     await handleSignupClick(
       fakeClickContext({
         channelId: "c-signup",
@@ -174,9 +171,9 @@ describe("B-003: lady-of-the-lake toggle on signup", () => {
       }),
       "lady",
     );
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThanOrEqual(2);
+    expect(harness.callsTo("messages.edit").length).toBeGreaterThan(0);
   });
-  it("non-host lady click is rejected", async () => {
+  it("non-host lady click is a silent no-op", async () => {
     await buildSignupWith(7);
     harness.resetCalls();
     await handleSignupClick(
@@ -188,9 +185,9 @@ describe("B-003: lady-of-the-lake toggle on signup", () => {
       }),
       "lady",
     );
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
-    // No board repaint for a rejected click.
+    // No board repaint, no ephemeral for a rejected click.
     expect(harness.callsTo("messages.edit").length).toBe(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
   it("leaving below 7 players forces ladyEnabled back to false", async () => {
     // H-1: stale-true UX guard. 7p → toggle on → one leaves (n=6 →
@@ -229,9 +226,7 @@ describe("B-003: lady-of-the-lake toggle on signup", () => {
       }),
       "lady",
     );
-    // ephemeral fires (ladyNeeds7); board NOT repainted (lady state
-    // didn't flip — was already false after the auto-reset).
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    // Under threshold — silent no-op: board NOT repainted.
     expect(harness.callsTo("messages.edit").length).toBe(0);
   });
 });

@@ -47,12 +47,14 @@ describe("flow-003: non-leader appoint click is rejected", () => {
     await openAppoint(game);
     harness.resetCalls();
     await click({ channelId: "c-appt-nonleader", userId: "u1", componentId: "appt", tail: "s:2" });
+    // Non-leader click is a silent no-op — selection unchanged, and no
+    // ephemeral nag is sent.
     if (game.current?.kind === "appoint") {
       expect(game.current.selected).toEqual([]);
     } else {
       throw new Error("expected appoint stage");
     }
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 
@@ -68,13 +70,13 @@ describe("flow-004: appoint refuses an extra selection when full", () => {
     await click({ channelId: "c-appt-full", userId: "u0", componentId: "appt", tail: "s:2" });
     harness.resetCalls();
     await click({ channelId: "c-appt-full", userId: "u0", componentId: "appt", tail: "s:3" });
+    // At capacity — the extra tap is a silent no-op (no ephemeral nag).
     if (game.current?.kind === "appoint") {
       expect(game.current.selected).toEqual([1, 2]);
     } else {
       throw new Error("expected appoint stage");
     }
-    // The ephemeral nudge fires; presence is enough — exact text is i18n-001's job.
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 
@@ -110,8 +112,8 @@ describe("appoint seat toggle removes a selected seat on re-click", () => {
   });
 });
 
-describe("flow-029: deal-board click from a non-player triggers notInGame ephemeral", () => {
-  it("non-player click on `deal` doesn't change state", async () => {
+describe("flow-029: deal-board click from a non-player is a silent no-op", () => {
+  it("non-player click on `deal` sends no followup", async () => {
     const game = buildGame({
       positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
       channelId: "c-deal-non",
@@ -119,7 +121,7 @@ describe("flow-029: deal-board click from a non-player triggers notInGame epheme
     void game;
     harness.resetCalls();
     await click({ channelId: "c-deal-non", userId: "stranger", componentId: "deal" });
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 
@@ -228,7 +230,7 @@ describe("flow-041: deal:help renders a role-description embed", () => {
     expect(markerLines).not.toContain("🔴");
     expect(markerLines).not.toContain("🟣");
   });
-  it("non-player help click → notInGame ephemeral", async () => {
+  it("non-player help click is a silent no-op", async () => {
     const game = buildGame({
       positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
       channelId: "c-deal-help-5",
@@ -241,14 +243,6 @@ describe("flow-041: deal:help renders a role-description embed", () => {
       componentId: "deal",
       tail: "help",
     });
-    const followups = harness.callsTo("interactions.followup");
-    expect(followups.length).toBe(1);
-    // Notice ephemeral has `content`, not `embeds`.
-    const body = followups[0].body as {
-      content?: string;
-      embeds?: unknown[];
-    };
-    expect(body.content).toBeTruthy();
-    expect(body.embeds).toBeUndefined();
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });

@@ -122,9 +122,10 @@ describe("flow-028: non-holder lake click is rejected", () => {
     await openLake(game);
     harness.resetCalls();
     await click({ channelId: "c-lake-stranger", userId: "u1", componentId: "lake", tail: "2" });
+    // Non-holder click is a silent no-op — stage + holder unchanged.
     expect(game.current?.kind).toBe("lake");
     expect(game.ladyHolderIndex).toBe(5);
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 

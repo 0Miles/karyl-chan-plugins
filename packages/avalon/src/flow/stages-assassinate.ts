@@ -15,7 +15,6 @@ import { getGame } from "../game/store.js";
 import { ROLES } from "../game/roles.js";
 import {
   editMessage,
-  toastEphemeral,
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
@@ -71,31 +70,15 @@ export async function handleAssassinateClick(
   tail: string,
 ): Promise<ComponentReply> {
   const game = getGame(ctx.channelId!);
-  if (!game || game.current?.kind !== "assassinate") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "error.notRunning"),
-    });
-    return null;
-  }
+  // Invalid clicks (stale board, non-assassin, self — the board
+  // already omits the assassin's own seat) are dropped silently.
+  if (!game || game.current?.kind !== "assassinate") return null;
   const me = playerByUserId(game, ctx.userId);
-  if (!me || me.position !== "assassin") {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.assassinate.notAssassin"),
-    });
-    return null;
-  }
+  if (!me || me.position !== "assassin") return null;
   const seat = Number(tail);
   const target = playerByIndex(game, seat);
   if (!target) return null;
-  if (target.userId === me.userId) {
-    await toastEphemeral({
-      interactionToken: ctx.interactionToken,
-      content: t(undefined, "stage.assassinate.cannotSelf"),
-    });
-    return null;
-  }
+  if (target.userId === me.userId) return null;
 
   game.assassinTargetIndex = seat;
   const verdict = settleAssassinate(game);

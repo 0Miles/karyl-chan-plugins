@@ -99,10 +99,12 @@ describe("flow-015: non-member private-vote rejected", () => {
     await openPrivateVote(game, [1, 3]);
     harness.resetCalls();
     await click({ channelId: "c-priv-nonmem", userId: "u0", componentId: "priv", tail: "open" });
+    // Non-member tap on 前往投票 is a silent no-op — no vote recorded,
+    // no ephemeral prompt sent.
     if (game.current?.kind === "privateVote") {
       expect(Object.keys(game.current.votes)).toHaveLength(0);
     }
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 

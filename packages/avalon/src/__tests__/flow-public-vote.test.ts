@@ -61,8 +61,8 @@ describe("flow-007: public-vote tie counts as reject", () => {
   });
 });
 
-describe("flow-008: non-player public-vote click is rejected", () => {
-  it("clicker not in roster → ephemeral notPlayer, vote not recorded", async () => {
+describe("flow-008: non-player public-vote click is a silent no-op", () => {
+  it("clicker not in roster → vote not recorded, no ephemeral", async () => {
     const game = buildGame({
       positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
       channelId: "c-pub-nonpl",
@@ -75,9 +75,7 @@ describe("flow-008: non-player public-vote click is rejected", () => {
     } else {
       throw new Error("stage transitioned unexpectedly");
     }
-    // Ephemeral nudge fired.
-    const followups = harness.callsTo("interactions.followup");
-    expect(followups.length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 
@@ -118,8 +116,8 @@ describe("flow-010: 5 consecutive rejections ends the game (mordred)", () => {
   });
 });
 
-describe("flow-030: dispatcher rejects clicks for the wrong stage", () => {
-  it("clicking appt during publicVote yields error.notRunning ephemeral, state intact", async () => {
+describe("flow-030: dispatcher drops clicks for the wrong stage", () => {
+  it("clicking appt during publicVote is a silent no-op, state intact", async () => {
     const game = buildGame({
       positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
       channelId: "c-stage-mix",
@@ -127,10 +125,9 @@ describe("flow-030: dispatcher rejects clicks for the wrong stage", () => {
     await openPublicVote(game, [0, 1]);
     harness.resetCalls();
     await click({ channelId: "c-stage-mix", userId: "u0", componentId: "appt", tail: "s:1" });
-    // No state change.
+    // No state change, no ephemeral nag.
     expect(game.current?.kind).toBe("publicVote");
-    // Followup fired (notRunning) — content not asserted, presence is.
-    expect(harness.callsTo("interactions.followup").length).toBeGreaterThan(0);
+    expect(harness.callsTo("interactions.followup").length).toBe(0);
   });
 });
 
