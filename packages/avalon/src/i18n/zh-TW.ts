@@ -186,7 +186,7 @@ export const zhTW = {
   "role.minion": "莫德雷德的爪牙",
   "role.flavor.merlin": "✨ 你是 **梅林** — 你看得見莫甘娜、刺客、奧伯倫（莫德雷德除外）。別讓刺客找出你。",
   "role.flavor.percival": "🛡 你是 **派西維爾** — 你看見梅林與莫甘娜，但分不清誰是誰。保護真正的梅林。",
-  "role.flavor.assassin": "🗡 你是 **刺客** — 三次任務成功後，你有一發子彈擊殺梅林、反敗為勝。",
+  "role.flavor.assassin": "🗡 你是 **刺客** — 三次任務成功後，你有一次機會擊殺梅林、反敗為勝。",
   "role.flavor.morgana": "🎭 你是 **莫甘娜** — 派西維爾會把你誤認成梅林。儘量假裝藍方。",
   "role.flavor.mordred": "👑 你是 **莫德雷德** — 連梅林也看不見你，潛伏吧。",
   "role.flavor.oberon": "🦉 你是 **奧伯倫** — 你看不見隊友、隊友也看不見你。獨自破壞任務。",
