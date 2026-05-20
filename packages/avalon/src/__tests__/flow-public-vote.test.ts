@@ -42,6 +42,40 @@ describe("flow-006: public-vote pass opens privateVote", () => {
   });
 });
 
+describe("flow-006b: resolved public vote reveals every player's ballot", () => {
+  it("resolved board lists all 5 seats with ✅/❌ marks, no ❎", async () => {
+    const game = buildGame({
+      positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
+      channelId: "c-pub-ballots",
+    });
+    await openPublicVote(game, [0, 1]);
+    harness.resetCalls();
+    for (const [u, t] of [
+      ["u0", "y"],
+      ["u1", "y"],
+      ["u2", "y"],
+      ["u3", "n"],
+      ["u4", "n"],
+    ] as const) {
+      await click({ channelId: "c-pub-ballots", userId: u, componentId: "pub", tail: t });
+    }
+    const edits = harness.callsTo("messages.edit");
+    const resolved = edits[edits.length - 1].body as {
+      embeds: Array<{ fields: Array<{ name: string; value: string }> }>;
+    };
+    const fields = resolved.embeds[0].fields;
+    const ballots = fields.find((f) => f.name.includes("投票明細"));
+    expect(ballots).toBeTruthy();
+    expect(ballots!.value.split("\n")).toHaveLength(5);
+    expect(ballots!.value).toContain("✅ `1` P0");
+    expect(ballots!.value).toContain("❌ `4` P3");
+    expect(ballots!.value).not.toContain("❎");
+    // The reject side of the tally also drops the old ❎ glyph.
+    const result = fields.find((f) => f.name.includes("投票結果"));
+    expect(result!.value).not.toContain("❎");
+  });
+});
+
 describe("flow-007: public-vote tie counts as reject", () => {
   it("4-player tie 2-2 (artificially) → reject path", async () => {
     // Build a 4-player game manually to force a clean 2-2 tie. (n=4

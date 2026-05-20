@@ -108,12 +108,19 @@ export async function resolvePublicVote(game: GameState): Promise<void> {
   const missionMembers = game.current.missionMembers;
   const messageId = game.current.messageId;
 
-  // Reveal the final tally on the board.
+  // Reveal the final tally + every player's ballot on the board.
   await editMessage({
     channelId: game.channelId,
     messageId,
     embeds: [
-      renderPublicVoteResolved(game, missionMembers, yes, no, passed),
+      renderPublicVoteResolved(
+        game,
+        missionMembers,
+        game.current.votes,
+        yes,
+        no,
+        passed,
+      ),
     ],
     components: [],
   });
@@ -197,6 +204,7 @@ export function renderPublicVoteEmbed(
 function renderPublicVoteResolved(
   state: GameState,
   missionMembers: number[],
+  votes: Record<string, "yes" | "no">,
   yes: number,
   no: number,
   passed: boolean,
@@ -206,6 +214,14 @@ function renderPublicVoteResolved(
     .map((s) => playerByIndex(state, s))
     .filter((p): p is NonNullable<typeof p> => p !== null)
     .map((p) => `\`${p.index + 1}\` ${p.displayName}`)
+    .join("\n");
+  // Public vote is open information once resolved — list every seat
+  // with the ballot they cast (✅ approve / ❌ reject).
+  const ballotLines = state.players
+    .map((p) => {
+      const mark = votes[p.userId] === "yes" ? "✅" : "❌";
+      return `${mark} \`${p.index + 1}\` ${p.displayName}`;
+    })
     .join("\n");
   return {
     title: t(undefined, "stage.publicVote.title", { round: state.round }),
@@ -221,11 +237,16 @@ function renderPublicVoteResolved(
         inline: false,
       },
       {
+        name: t(undefined, "stage.publicVote.fieldBallots"),
+        value: ballotLines || "—",
+        inline: false,
+      },
+      {
         name: t(undefined, "stage.publicVote.fieldResult"),
         value:
           (passed
             ? `✅ ${t(undefined, "stage.publicVote.passed")}`
-            : `❎ ${t(undefined, "stage.publicVote.rejected")}`) +
+            : `❌ ${t(undefined, "stage.publicVote.rejected")}`) +
           " · " +
           t(undefined, "stage.publicVote.tally", { yes, no }),
         inline: false,

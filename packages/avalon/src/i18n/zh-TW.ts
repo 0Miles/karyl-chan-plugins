@@ -123,9 +123,10 @@ export const zhTW = {
   "stage.publicVote.fieldRejections": "連續否決",
   "stage.publicVote.voted": "{n} / {total} 已投",
   "stage.publicVote.fieldResult": "投票結果",
+  "stage.publicVote.fieldBallots": "投票明細",
   "stage.publicVote.passed": "通過",
   "stage.publicVote.rejected": "否決",
-  "stage.publicVote.tally": "✅ {yes}　❎ {no}",
+  "stage.publicVote.tally": "✅ {yes}　❌ {no}",
   "stage.publicVote.rejectionWarn": "連續否決 {n} / 5 — 達到 5 次紅方獲勝。",
 
   "stage.privateVote.title": "第 {round} 輪：任務投票",

@@ -49,9 +49,9 @@ export function truncate(s: string, max: number): string {
 }
 
 /**
- * Five-slot mission progress bar. ✅ for a successful mission, ❎ for a
- * failure, 🔵/🔴 for the currently-being-played round when we want to
- * highlight the in-progress slot, and ⚪ for not-yet-started.
+ * Five-slot mission progress bar. 🔵 a mission the blue side won, 🔴 a
+ * mission the red side won, 🔲 the round currently in play, ▫️ a round
+ * not yet started.
  *
  * Includes a final rejection-counter chunk (`⚠ n/5`) when the round
  * has open rejection bookings — important context for the public-vote
@@ -61,10 +61,10 @@ export function missionProgressLine(state: GameState): string {
   const slots: string[] = [];
   for (let i = 0; i < 5; i++) {
     const r = state.missionResults[i];
-    if (r === "success") slots.push("✅");
-    else if (r === "fail") slots.push("❎");
-    else if (i + 1 === state.round && state.stage !== "ended") slots.push("🟡");
-    else slots.push("⚪");
+    if (r === "success") slots.push("🔵");
+    else if (r === "fail") slots.push("🔴");
+    else if (i + 1 === state.round && state.stage !== "ended") slots.push("🔲");
+    else slots.push("▫️");
   }
   const base = slots.join(" ");
   if (state.consecutiveRejections > 0 && state.stage !== "ended") {
