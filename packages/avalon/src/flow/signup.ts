@@ -119,21 +119,23 @@ export async function startSignup(
       userId: `${NPC_USERID_PREFIX}${i}`,
       displayName,
     }));
-    // Initial board: host + seeded NPCs in the roster.
+    // Initial board: host + seeded NPCs in the roster. The lady
+    // toggle is unlocked straight away if the seeded roster already
+    // hits the 7-player threshold (e.g. `/avalon start npc:6`).
+    const initialTotal = 1 + initialNpcs.length;
+    const initialLadyUnlocked = initialTotal >= LADY_MIN_PLAYERS;
     const sent = await sendMessage({
       channelId,
       embeds: [renderSignupEmbed(hostMention, [ctx.userDisplayName], {
         npcNames: initialNpcs.map((n) => n.displayName),
-        showLady: false,
         ladyEnabled: false,
       })],
       components: signupComponents({
         canStart:
-          1 + initialNpcs.length >= MIN_PLAYERS &&
-          1 + initialNpcs.length <= MAX_PLAYERS,
-        showLady: false,
+          initialTotal >= MIN_PLAYERS && initialTotal <= MAX_PLAYERS,
+        ladyUnlocked: initialLadyUnlocked,
         ladyEnabled: false,
-        canAddNpc: 1 + initialNpcs.length < MAX_PLAYERS,
+        canAddNpc: initialTotal < MAX_PLAYERS,
         canRemoveNpc: initialNpcs.length > 0,
       }),
     });
@@ -395,11 +397,9 @@ function renderSignupEmbed(
   hostMention: string,
   names: string[],
   opts: {
-    showLady: boolean;
     ladyEnabled: boolean;
     npcNames?: string[];
   } = {
-    showLady: false,
     ladyEnabled: false,
   },
 ) {
@@ -419,15 +419,16 @@ function renderSignupEmbed(
       inline: true,
     });
   }
-  if (opts.showLady) {
-    fields.push({
-      name: t(undefined, "stage.signup.fieldLady"),
-      value: opts.ladyEnabled
-        ? t(undefined, "stage.signup.ladyStateOn")
-        : t(undefined, "stage.signup.ladyStateOff"),
-      inline: true,
-    });
-  }
+  // Lady-of-the-Lake state is always shown — the toggle button is
+  // always present (just disabled below 7 players), so the field
+  // pairs with it.
+  fields.push({
+    name: t(undefined, "stage.signup.fieldLady"),
+    value: opts.ladyEnabled
+      ? t(undefined, "stage.signup.ladyStateOn")
+      : t(undefined, "stage.signup.ladyStateOff"),
+    inline: true,
+  });
   if (names.length > 0) {
     fields.push({
       name: t(undefined, "stage.signup.fieldRoster"),
@@ -453,12 +454,19 @@ function renderSignupEmbed(
 
 function signupComponents(opts: {
   canStart: boolean;
-  showLady: boolean;
+  /** Whether the lady toggle is clickable — true once the roster ≥ 7. */
+  ladyUnlocked: boolean;
   ladyEnabled: boolean;
   canAddNpc: boolean;
   canRemoveNpc: boolean;
 }) {
-  const row1 = [
+  const row1: Array<{
+    type: 2;
+    style: 1 | 2 | 3 | 4 | 5;
+    custom_id: string;
+    label: string;
+    disabled?: boolean;
+  }> = [
     {
       type: 2 as const,
       style: 3 as const,
@@ -485,20 +493,19 @@ function signupComponents(opts: {
       label: t(undefined, "stage.signup.cancel"),
     },
   ];
-  // Lady-of-the-Lake toggle only renders when the roster crosses the
-  // rulebook threshold; below that there's no legal mode to enable.
-  // Green when active, grey when off — mirrors the radio plugin's
-  // loop-mode toggle convention.
-  if (opts.showLady) {
-    row1.push({
-      type: 2 as const,
-      style: opts.ladyEnabled ? (3 as const) : (2 as const),
-      custom_id: componentCustomId(PLUGIN_KEY, "sig", "lady"),
-      label: opts.ladyEnabled
-        ? t(undefined, "stage.signup.ladyButtonOn")
-        : t(undefined, "stage.signup.ladyButtonOff"),
-    });
-  }
+  // Lady-of-the-Lake toggle is always shown. It stays disabled below
+  // the rulebook's 7-player threshold and unlocks once the roster
+  // reaches it. Green when active, grey when off — mirrors the radio
+  // plugin's loop-mode toggle convention.
+  row1.push({
+    type: 2 as const,
+    style: opts.ladyEnabled ? (3 as const) : (2 as const),
+    custom_id: componentCustomId(PLUGIN_KEY, "sig", "lady"),
+    label: opts.ladyEnabled
+      ? t(undefined, "stage.signup.ladyButtonOn")
+      : t(undefined, "stage.signup.ladyButtonOff"),
+    disabled: !opts.ladyUnlocked,
+  });
   // NPC +/− on their own row so the primary controls stay in row 1.
   // Discord allows up to 5 action rows per message; signup uses 2.
   const row2: Array<{
@@ -536,20 +543,19 @@ async function refreshSignupMessage(channelId: string): Promise<void> {
   const npcNames = signup.npcs.map((n) => n.displayName);
   const total = names.length + npcNames.length;
   const hostMention = `<@${signup.hostUserId}>`;
-  const showLady = total >= LADY_MIN_PLAYERS;
+  const ladyUnlocked = total >= LADY_MIN_PLAYERS;
   await editMessage({
     channelId,
     messageId: signup.messageId,
     embeds: [
       renderSignupEmbed(hostMention, names, {
-        showLady,
         ladyEnabled: signup.ladyEnabled,
         npcNames,
       }),
     ],
     components: signupComponents({
       canStart: total >= MIN_PLAYERS && total <= MAX_PLAYERS,
-      showLady,
+      ladyUnlocked,
       ladyEnabled: signup.ladyEnabled,
       canAddNpc: total < MAX_PLAYERS,
       canRemoveNpc: signup.npcs.length > 0,
