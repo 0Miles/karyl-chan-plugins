@@ -1,11 +1,13 @@
 import { randomBytes } from "crypto";
 import {
+  DEFAULT_ROLE_TOGGLES,
   ROLES,
   missionSize,
   round4Needs2Fail,
   rolesForPlayerCount,
   type Faction,
   type Position,
+  type RoleToggles,
 } from "./roles.js";
 
 /**
@@ -101,6 +103,12 @@ export interface GameState {
   /** Per-round outcome, populated as missions resolve. */
   missionResults: Array<MissionResult | null>;
   ladyEnabled: boolean;
+  /**
+   * Optional special roles in play, fixed at `/avalon start` time.
+   * `deal()` feeds this to `rolesForPlayerCount` so a toggled-off role
+   * is replaced by a powerless stand-in.
+   */
+  roleToggles: RoleToggles;
   /** Seat index holding the Lady of the Lake right now (or null when disabled). */
   ladyHolderIndex: number | null;
   /** Times the lady has been used this game. */
@@ -151,6 +159,8 @@ export function newGameState(opts: {
   hostUserId: string;
   signups: Array<{ userId: string; displayName: string }>;
   ladyEnabled: boolean;
+  /** Optional special roles; defaults to all enabled. */
+  roleToggles?: RoleToggles;
 }): GameState {
   if (opts.signups.length < 4 || opts.signups.length > 10) {
     throw new Error(`player count out of range: ${opts.signups.length}`);
@@ -174,6 +184,7 @@ export function newGameState(opts: {
     leaderIndex: 0,
     missionResults: [null, null, null, null, null],
     ladyEnabled: opts.ladyEnabled,
+    roleToggles: opts.roleToggles ?? DEFAULT_ROLE_TOGGLES,
     ladyHolderIndex: null,
     ladyUseCount: 0,
     assassinTargetIndex: null,
@@ -203,7 +214,7 @@ function shuffle<T>(arr: T[]): void {
  */
 export function deal(state: GameState): void {
   const n = state.players.length;
-  const deck = rolesForPlayerCount(n);
+  const deck = rolesForPlayerCount(n, state.roleToggles);
   shuffle(deck);
   shuffle(state.players);
   state.players.forEach((p, i) => {

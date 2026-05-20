@@ -172,7 +172,7 @@ describe("state-010: deal assigns each role exactly once", () => {
     const game = fivePlayerGame();
     const dealt = game.players.map((p) => p.position).sort();
     expect(dealt).toEqual(
-      ["assassin", "loyal", "loyal", "merlin", "morgana"].sort(),
+      ["assassin", "loyal", "merlin", "morgana", "percival"].sort(),
     );
   });
 });

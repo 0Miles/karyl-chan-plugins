@@ -17,10 +17,9 @@ export type Position =
   | "mordred"
   | "oberon"
   | "loyal"
-  // Plain Minion of Mordred — present in the role catalog (faction +
-  // vision wired below) so admin-uploaded art slots have somewhere to
-  // attach, but NOT currently included in any `rolesForPlayerCount`
-  // deck. Pre-staged for a future deck variant.
+  // Plain Minion of Mordred — a powerless evil role. Enters a deck
+  // whenever an optional evil special (Morgana / Mordred / Oberon) is
+  // toggled off at `/avalon start`: that seat downgrades to a Minion.
   | "minion";
 
 export type Faction = "arthur" | "mordred";
@@ -60,45 +59,78 @@ export const ROLES: Record<Position, RoleSpec> = {
 } as const;
 
 /**
- * Pick the role deck for a game of `n` players. Mirrors the Python
- * bot's tables exactly so an Avalon veteran sees no surprises.
- *
- *  4 players: Merlin + 1 evil (assassin) + 2 loyal       (4 = 1A:3B is too soft,
- *  5 players: Merlin + assassin + morgana + 2 loyal       so 4p is half-cooked
- *  6 players: Merlin + Percival + assassin + morgana + 2 loyal   in the original)
- *  7 players: Merlin + Percival + assassin + morgana + mordred + 2 loyal
- *  8–10: standard tables (see Avalon rulebook).
+ * Optional special roles a host can switch on/off at `/avalon start`.
+ * All default to `true`; a role switched off is replaced in the deck
+ * by a powerless stand-in (Loyal Servant for Percival, Minion of
+ * Mordred for the evil specials).
  */
-export function rolesForPlayerCount(n: number): Position[] {
+export interface RoleToggles {
+  /** Percival — sees Merlin + Morgana. Off ⇒ a plain Loyal Servant. */
+  percival: boolean;
+  /** Morgana — appears to Percival as Merlin. Off ⇒ a plain Minion. */
+  morgana: boolean;
+  /** Mordred — hidden from Merlin. Off ⇒ a plain Minion. */
+  mordred: boolean;
+  /** Oberon — isolated from the other evils. Off ⇒ a plain Minion. */
+  oberon: boolean;
+}
+
+/** Every optional role enabled — the `/avalon start` default. */
+export const DEFAULT_ROLE_TOGGLES: RoleToggles = {
+  percival: true,
+  morgana: true,
+  mordred: true,
+  oberon: true,
+};
+
+/**
+ * Evil specials in the order they claim the non-Assassin evil seats as
+ * the table grows: Morgana (5+ players), Mordred (7+), Oberon (10).
+ * `rolesForPlayerCount` walks this list up to `evilCount - 1` entries.
+ */
+const RED_SPECIAL_PRIORITY = ["morgana", "mordred", "oberon"] as const;
+
+/**
+ * Pick the role deck for a game of `n` players.
+ *
+ * The deck is built by seat *slots*: Merlin + Assassin are fixed, then
+ * each remaining seat is a slot that — depending on player count — a
+ * special role is eligible to claim. A slot whose role is toggled off
+ * (or whose count threshold isn't met) holds a powerless stand-in
+ * instead: Loyal Servant on the blue side, Minion of Mordred on red.
+ *
+ *  5–6 players: 2 evil  → Assassin + [Morgana]
+ *  7–9 players: 3 evil  → Assassin + [Morgana, Mordred]
+ *  10 players : 4 evil  → Assassin + [Morgana, Mordred, Oberon]
+ *
+ * Blue side always carries Merlin; the first non-Merlin seat is
+ * Percival's slot. Remaining seats are Loyal Servants.
+ */
+export function rolesForPlayerCount(
+  n: number,
+  toggles: RoleToggles = DEFAULT_ROLE_TOGGLES,
+): Position[] {
   if (n < 4 || n > 10) throw new Error(`Avalon supports 4–10 players, got ${n}`);
-  // Python's original treats >=4 as starting at the all-loyal core and
-  // adding red roles by group size — we keep that table verbatim.
-  // [merlin, percival, assassin, morgana, mordred, oberon] are slots 1-6.
   const evilCount = n <= 6 ? 2 : n <= 9 ? 3 : 4;
-  // Loyal fill: n - red - blue specials (merlin + percival).
-  const hasPercival = n >= 6;
-  const hasMorgana = n >= 5;
-  const hasMordred = n >= 7;
-  const hasOberon = n >= 10;
-  const deck: Position[] = ["merlin", "assassin"]; // always present
-  if (hasPercival) deck.push("percival");
-  if (hasMorgana) deck.push("morgana");
-  if (hasMordred) deck.push("mordred");
-  if (hasOberon) deck.push("oberon");
-  // Fill the rest with loyal servants.
-  const blueAlready = 1 + (hasPercival ? 1 : 0); // merlin (+ percival)
-  const redAlready = deck.filter((p) => ROLES[p].faction === "mordred").length;
-  const sanityAssert = blueAlready + redAlready === deck.length;
-  if (!sanityAssert) throw new Error("role deck math is off");
-  // After this n - blueAlready - redAlready slots are loyals.
-  // Cross-check red count matches the table.
-  if (redAlready !== evilCount) {
-    throw new Error(
-      `role table mismatch: n=${n} wanted ${evilCount} evil, got ${redAlready}`,
-    );
+  const goodCount = n - evilCount;
+
+  // Blue: Merlin is fixed. The first non-Merlin seat is Percival's
+  // slot — a plain Loyal Servant when Percival is toggled off. Any
+  // further seats are Loyal Servants.
+  const blue: Position[] = ["merlin"];
+  if (goodCount >= 2) blue.push(toggles.percival ? "percival" : "loyal");
+  while (blue.length < goodCount) blue.push("loyal");
+
+  // Red: Assassin is fixed. The remaining evil seats are filled from
+  // RED_SPECIAL_PRIORITY in order; a seat whose special is toggled off
+  // downgrades to a plain Minion of Mordred.
+  const red: Position[] = ["assassin"];
+  for (let i = 0; i < evilCount - 1; i++) {
+    const special = RED_SPECIAL_PRIORITY[i];
+    red.push(toggles[special] ? special : "minion");
   }
-  while (deck.length < n) deck.push("loyal");
-  return deck;
+
+  return [...blue, ...red];
 }
 
 /**

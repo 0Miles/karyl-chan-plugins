@@ -1,22 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_ROLE_TOGGLES,
   ROLES,
   missionSize,
   round4Needs2Fail,
   rolesForPlayerCount,
   type Position,
+  type RoleToggles,
 } from "../game/roles.js";
 
 // Tests are indexed against TESTPLAN.md — keep the row ids in sync if
 // you add or rename a case so BUGS.md's "test that caught it" pointers
 // don't rot.
 
-describe("roles-002..007: rolesForPlayerCount decks (5..10)", () => {
-  // 4-player table is currently broken (see B-001 / roles-001) — its
-  // own test lives in a separate describe so it can be xfail'd without
-  // hiding the other rows.
+describe("roles-002..007: rolesForPlayerCount decks (5..10), all roles on", () => {
+  // Default toggles (every optional role enabled) — Percival now joins
+  // from 5 players up, paired with Morgana per the rulebook.
   const expectations: Record<number, Position[]> = {
-    5: ["merlin", "assassin", "morgana", "loyal", "loyal"],
+    5: ["merlin", "percival", "assassin", "morgana", "loyal"],
     6: ["merlin", "assassin", "percival", "morgana", "loyal", "loyal"],
     7: [
       "merlin",
@@ -84,20 +85,16 @@ describe("roles-002..007: rolesForPlayerCount decks (5..10)", () => {
   });
 });
 
-describe("roles-001: n=4 is rejected at the boundary (currently throws by accident — B-001)", () => {
-  // The intended behaviour: n=4 should EITHER yield a 1-evil deck OR be
-  // rejected with a clear "supports 5-10" message at the signup boundary
-  // (so the host learns BEFORE clicking start). Today rolesForPlayerCount
-  // throws a 「role table mismatch」 string deep inside deal() — that's
-  // surfaced to the host via dispatcher.ts's catch-all ephemeral nudge
-  // but leaves the signup hung. See B-001.
-  //
-  // For now we assert the *current* behaviour so the test catches a
-  // regression in either direction. When B-001 is fixed the assertion
-  // flips to either: deck === [merlin,assassin,loyal,loyal] OR throws
-  // "Avalon supports 5-10 players, got 4".
-  it("currently throws role-table-mismatch on n=4", () => {
-    expect(() => rolesForPlayerCount(4)).toThrowError(/n=4/);
+describe("roles-001: n=4 yields a valid deck (B-001 resolved)", () => {
+  // The old slot-math threw 「role table mismatch」 deep inside deal()
+  // on n=4. The slot-based builder no longer can: every seat resolves
+  // to a concrete role. n=4 is still unreachable through signup
+  // (MIN_PLAYERS = 5) but the engine no longer blows up on it.
+  it("n=4 deck is 2 good + 2 evil with no throw", () => {
+    const deck = rolesForPlayerCount(4);
+    expect([...deck].sort()).toEqual(
+      ["merlin", "percival", "assassin", "morgana"].sort(),
+    );
   });
 });
 
@@ -149,6 +146,68 @@ describe("roles-011: r4 two-fails threshold is n>=7", () => {
     [10, true],
   ])("round4Needs2Fail(%i) === %s", (n, expected) => {
     expect(round4Needs2Fail(n)).toBe(expected);
+  });
+});
+
+describe("roles-013: role toggles replace specials with powerless stand-ins", () => {
+  const freq = (deck: Position[], pos: Position): number =>
+    deck.filter((p) => p === pos).length;
+  const off = (over: Partial<RoleToggles>): RoleToggles => ({
+    ...DEFAULT_ROLE_TOGGLES,
+    ...over,
+  });
+
+  it("percival off ⇒ a Loyal Servant takes the slot, no Percival", () => {
+    const deck = rolesForPlayerCount(7, off({ percival: false }));
+    expect(freq(deck, "percival")).toBe(0);
+    expect(freq(deck, "loyal")).toBe(3); // was 2 + Percival's seat
+  });
+
+  it("morgana off at n=5 ⇒ a Minion takes the slot", () => {
+    const deck = rolesForPlayerCount(5, off({ morgana: false }));
+    expect([...deck].sort()).toEqual(
+      ["merlin", "percival", "loyal", "assassin", "minion"].sort(),
+    );
+  });
+
+  it("mordred off at n=7 ⇒ Minion fills it; Oberon stays out of a 7p deck", () => {
+    const deck = rolesForPlayerCount(7, off({ mordred: false }));
+    expect(freq(deck, "mordred")).toBe(0);
+    expect(freq(deck, "oberon")).toBe(0); // Oberon's slot opens only at 10
+    expect(freq(deck, "minion")).toBe(1);
+  });
+
+  it("oberon off at n=10 ⇒ Minion fills it", () => {
+    const deck = rolesForPlayerCount(10, off({ oberon: false }));
+    expect(freq(deck, "oberon")).toBe(0);
+    expect(freq(deck, "minion")).toBe(1);
+  });
+
+  it("every special off ⇒ only Merlin + Assassin keep their powers", () => {
+    const deck = rolesForPlayerCount(10, {
+      percival: false,
+      morgana: false,
+      mordred: false,
+      oberon: false,
+    });
+    expect(freq(deck, "merlin")).toBe(1);
+    expect(freq(deck, "assassin")).toBe(1);
+    expect(freq(deck, "loyal")).toBe(5);
+    expect(freq(deck, "minion")).toBe(3);
+  });
+
+  it("toggles never change the good/evil split", () => {
+    for (let n = 5; n <= 10; n++) {
+      const deck = rolesForPlayerCount(n, {
+        percival: false,
+        morgana: false,
+        mordred: false,
+        oberon: false,
+      });
+      const evil = deck.filter((p) => ROLES[p].faction === "mordred").length;
+      const expected = n <= 6 ? 2 : n <= 9 ? 3 : 4;
+      expect(evil).toBe(expected);
+    }
   });
 });
 
