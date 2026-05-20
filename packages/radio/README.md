@@ -112,7 +112,7 @@ links; the plugin picks up the new public key on its next heartbeat.
    and put the returned cleartext in `KARYL_PLUGIN_SETUP_SECRET_RADIO` in
    the monorepo's root `.env`.
 2. `COMPOSE_PROFILES` (root `.env`) must include `radio`.
-3. `pnpm docker:up` (from the monorepo root) — or `docker compose up --build -d karyl-radio-plugin`.
+3. `pnpm docker:up` (from the monorepo root) — or `docker compose up --build -d karyl-plugin-radio`.
 
 On startup the plugin registers with the bot, gets a token + the dispatch
 HMAC key + the JWT verify public key, and starts a ~30 s heartbeat; the

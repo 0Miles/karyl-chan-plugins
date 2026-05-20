@@ -55,18 +55,22 @@ jobs:
 
   docker-smoke:
     runs-on: ubuntu-latest
-    name: Docker smoke build (radio)
+    name: Docker smoke build (${{ matrix.plugin }})
     needs: build-and-test
     if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: [radio, avalon]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build radio image (no push)
+      - name: Build ${{ matrix.plugin }} image (no push)
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.radio
+          file: Dockerfile.${{ matrix.plugin }}
           push: false
-          tags: karyl-radio-plugin:ci
-          cache-from: type=gha,scope=plugin-radio
-          cache-to: type=gha,mode=max,scope=plugin-radio
+          tags: karyl-plugin-${{ matrix.plugin }}:ci
+          cache-from: type=gha,scope=plugin-${{ matrix.plugin }}
+          cache-to: type=gha,mode=max,scope=plugin-${{ matrix.plugin }}

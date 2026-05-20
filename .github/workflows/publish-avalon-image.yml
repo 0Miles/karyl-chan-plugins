@@ -1,10 +1,10 @@
-name: Publish radio image
+name: Publish avalon image
 
 on:
   push:
     branches: [main]
     tags:
-      - 'radio-v*'
+      - 'avalon-v*'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ env:
 
 jobs:
   publish:
-    name: Push radio image
+    name: Push avalon image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +35,11 @@ jobs:
         id: tags
         run: |
           OWNER_LC=$(echo "${{ env.IMAGE_OWNER }}" | tr '[:upper:]' '[:lower:]')
-          IMG="${{ env.REGISTRY }}/${OWNER_LC}/karyl-plugin-radio"
+          IMG="${{ env.REGISTRY }}/${OWNER_LC}/karyl-plugin-avalon"
           REF="${GITHUB_REF}"
-          if [[ "$REF" == refs/tags/radio-v* ]]; then
-            # tag form: radio-v<semver>  → :<semver> + :latest
-            VERSION="${REF#refs/tags/radio-v}"
+          if [[ "$REF" == refs/tags/avalon-v* ]]; then
+            # tag form: avalon-v<semver>  → :<semver> + :latest
+            VERSION="${REF#refs/tags/avalon-v}"
             echo "tags=$IMG:$VERSION,$IMG:latest" >> "$GITHUB_OUTPUT"
           else
             # push to main / manual dispatch → :edge AND :latest
@@ -52,13 +52,13 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.radio
+          file: Dockerfile.avalon
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            karyl.plugin.key=radio
-          cache-from: type=gha,scope=plugin-radio
-          cache-to: type=gha,mode=max,scope=plugin-radio
+            karyl.plugin.key=avalon
+          cache-from: type=gha,scope=plugin-avalon
+          cache-to: type=gha,mode=max,scope=plugin-avalon

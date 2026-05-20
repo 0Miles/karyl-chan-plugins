@@ -29,7 +29,7 @@ interface Runtime {
    * Browser-reachable base URL for this plugin's HTTP surface
    * (e.g. `https://bot.example.com/plugin/karyl-avalon`). Discord
    * embed thumbnails / images use this — the bot needs a public URL
-   * it can fetch from, not the internal http://karyl-avalon-plugin:3000.
+   * it can fetch from, not the internal http://karyl-plugin-avalon:3000.
    */
   publicBaseUrl(): string;
 }
