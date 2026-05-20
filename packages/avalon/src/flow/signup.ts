@@ -21,6 +21,7 @@ import {
 } from "../game/state.js";
 import {
   DEFAULT_ROLE_TOGGLES,
+  ROLES,
   type RoleToggles,
 } from "../game/roles.js";
 import { editMessage, sendMessage } from "./discord.js";
@@ -70,10 +71,9 @@ const signups = new Map<string, Signup>();
 
 /**
  * Minimum / maximum players. Bumped from 4→5 (B-001): n=4 is not a
- * supported Avalon table in the official rulebook and the role-deck
- * builder rejects it anyway. The mission-size table still has a row
- * for n=4 for historical clarity but is unreachable through the
- * signup flow.
+ * supported Avalon table in the official rulebook. The deck builder
+ * and mission-size table still handle n=4, but it is unreachable
+ * through the signup flow.
  */
 const MIN_PLAYERS = 5;
 const MAX_PLAYERS = 10;
@@ -214,9 +214,9 @@ export async function handleSignupClick(
 }
 
 /**
- * Host-only NPC roster controls. Mirrors the sig:lady pattern: host
- * gate first, capacity gate next, mutate then repaint. Total roster
- * (humans + NPCs) is bounded by MAX_PLAYERS = 10.
+ * Host-only NPC roster controls: host gate first, capacity gate next,
+ * mutate then repaint. Total roster (humans + NPCs) is bounded by
+ * MAX_PLAYERS = 10.
  */
 async function handleNpcAddClick(
   ctx: ComponentContext,
@@ -376,12 +376,9 @@ function renderRulesValue(
   lakeEnabled: boolean,
 ): string {
   const mark = (on: boolean): string => (on ? "✓" : "✗");
-  const roleLine = [
-    `${t(undefined, "role.morgana")} ${mark(roleToggles.morgana)}`,
-    `${t(undefined, "role.percival")} ${mark(roleToggles.percival)}`,
-    `${t(undefined, "role.mordred")} ${mark(roleToggles.mordred)}`,
-    `${t(undefined, "role.oberon")} ${mark(roleToggles.oberon)}`,
-  ].join("　");
+  const roleLine = (["morgana", "percival", "mordred", "oberon"] as const)
+    .map((pos) => `${t(undefined, ROLES[pos].nameKey)} ${mark(roleToggles[pos])}`)
+    .join("　");
   const lakeLine =
     `${t(undefined, "stage.signup.fieldLady")} ${mark(lakeEnabled)}` +
     `${lakeEnabled ? t(undefined, "stage.signup.lakeNote") : ""}`;

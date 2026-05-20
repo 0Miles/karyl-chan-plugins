@@ -17,9 +17,7 @@ export type Position =
   | "mordred"
   | "oberon"
   | "loyal"
-  // Plain Minion of Mordred — a powerless evil role. Enters a deck
-  // whenever an optional evil special (Morgana / Mordred / Oberon) is
-  // toggled off at `/avalon start`: that seat downgrades to a Minion.
+  // Plain Minion of Mordred — a powerless evil role.
   | "minion";
 
 export type Faction = "arthur" | "mordred";
@@ -65,23 +63,27 @@ export const ROLES: Record<Position, RoleSpec> = {
  * Mordred for the evil specials).
  */
 export interface RoleToggles {
-  /** Percival — sees Merlin + Morgana. Off ⇒ a plain Loyal Servant. */
-  percival: boolean;
   /** Morgana — appears to Percival as Merlin. Off ⇒ a plain Minion. */
   morgana: boolean;
+  /** Percival — sees Merlin + Morgana. Off ⇒ a plain Loyal Servant. */
+  percival: boolean;
   /** Mordred — hidden from Merlin. Off ⇒ a plain Minion. */
   mordred: boolean;
   /** Oberon — isolated from the other evils. Off ⇒ a plain Minion. */
   oberon: boolean;
 }
 
-/** Every optional role enabled — the `/avalon start` default. */
-export const DEFAULT_ROLE_TOGGLES: RoleToggles = {
-  percival: true,
+/**
+ * Every optional role enabled — the `/avalon start` default. Frozen:
+ * it is aliased by reference into every default GameState, so an
+ * accidental field write would rewrite the rulebook process-wide.
+ */
+export const DEFAULT_ROLE_TOGGLES: RoleToggles = Object.freeze({
   morgana: true,
+  percival: true,
   mordred: true,
   oberon: true,
-};
+});
 
 /**
  * Evil specials in the order they claim the non-Assassin evil seats as
@@ -114,16 +116,11 @@ export function rolesForPlayerCount(
   const evilCount = n <= 6 ? 2 : n <= 9 ? 3 : 4;
   const goodCount = n - evilCount;
 
-  // Blue: Merlin is fixed. The first non-Merlin seat is Percival's
-  // slot — a plain Loyal Servant when Percival is toggled off. Any
-  // further seats are Loyal Servants.
   const blue: Position[] = ["merlin"];
   if (goodCount >= 2) blue.push(toggles.percival ? "percival" : "loyal");
   while (blue.length < goodCount) blue.push("loyal");
 
-  // Red: Assassin is fixed. The remaining evil seats are filled from
-  // RED_SPECIAL_PRIORITY in order; a seat whose special is toggled off
-  // downgrades to a plain Minion of Mordred.
+  // Assassin already holds one evil seat, so only evilCount - 1 remain.
   const red: Position[] = ["assassin"];
   for (let i = 0; i < evilCount - 1; i++) {
     const special = RED_SPECIAL_PRIORITY[i];
