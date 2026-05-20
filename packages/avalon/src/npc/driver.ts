@@ -339,21 +339,16 @@ async function performLake(state: GameState, npc: Player): Promise<void> {
   state.ladyHolderIndex = target.index;
   state.ladyUseCount++;
   const messageId = state.current.messageId;
-  await editMessage({
-    channelId: state.channelId,
+  // Use the shared board renderer so the NPC path keeps the lake
+  // thumbnail embedded — a hand-rolled embed here would drop the
+  // `attachment://` ref and orphan the asset into a separate image.
+  const { editLakeCheckedBoard } = await import("../flow/stages-lake.js");
+  await editLakeCheckedBoard(
+    state.channelId,
     messageId,
-    embeds: [
-      {
-        color: EMBED_COLOR,
-        title: t(undefined, "stage.lake.title"),
-        description: t(undefined, "stage.lake.checked", {
-          holder: `**${npc.displayName}**`,
-          target: `**${target.displayName}**`,
-        }),
-      },
-    ],
-    components: [],
-  });
+    npc.displayName,
+    target.displayName,
+  );
   state.current = null;
   const verdict = evaluateVerdict(state);
   if (verdict.ended) {

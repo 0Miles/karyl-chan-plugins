@@ -150,27 +150,12 @@ export async function handleLakeClick(
   game.ladyHolderIndex = target.index;
   game.ladyUseCount++;
 
-  // The board keeps the attachment posted by openLake — a message
-  // edit that omits `attachments` retains the existing files, so the
-  // embed's `attachment://` ref still resolves.
-  await editMessage({
-    channelId: game.channelId,
-    messageId: game.current.messageId,
-    embeds: [
-      withThumbnail(
-        {
-          color: EMBED_COLOR,
-          title: t(undefined, "stage.lake.title"),
-          description: t(undefined, "stage.lake.checked", {
-            holder: `**${holder.displayName}**`,
-            target: `**${target.displayName}**`,
-          }),
-        },
-        lakeArt,
-      ),
-    ],
-    components: [],
-  });
+  await editLakeCheckedBoard(
+    game.channelId,
+    game.current.messageId,
+    holder.displayName,
+    target.displayName,
+  );
 
   game.current = null;
   const verdict = evaluateVerdict(game);
@@ -181,6 +166,46 @@ export async function handleLakeClick(
   rotateLeader(game);
   await openAppoint(game);
   return null;
+}
+
+/**
+ * Repaint the lake public board into its post-check "X 用湖中女神查驗
+ * 了 Y" state, keeping the lake thumbnail embedded.
+ *
+ * The embed's `thumbnail` must keep referencing `attachment://<lake>`
+ * so Discord renders the asset INSIDE the card. A message edit that
+ * omits `attachments` retains the file posted by `openLake`, so the
+ * reference still resolves — but the embed has to carry the
+ * reference. Shared by the human (`handleLakeClick`) and NPC
+ * (`driver.performLake`) paths so both render identically; a
+ * thumbnail-less edit would orphan the retained file into a separate
+ * image block below the card.
+ */
+export async function editLakeCheckedBoard(
+  channelId: string,
+  messageId: string,
+  holderName: string,
+  targetName: string,
+): Promise<void> {
+  const lakeArt = await lakeThumbnail();
+  await editMessage({
+    channelId,
+    messageId,
+    embeds: [
+      withThumbnail(
+        {
+          color: EMBED_COLOR,
+          title: t(undefined, "stage.lake.title"),
+          description: t(undefined, "stage.lake.checked", {
+            holder: `**${holderName}**`,
+            target: `**${targetName}**`,
+          }),
+        },
+        lakeArt,
+      ),
+    ],
+    components: [],
+  });
 }
 
 // ── rendering ──────────────────────────────────────────────────────────
