@@ -80,7 +80,7 @@ export const zhTW = {
   "stage.deal.markerSection": "你的視野標記說明",
 
   "marker.self": "你自己",
-  "marker.merlinRed": "你看到的紅方角色（莫德雷德對你隱形）",
+  "marker.merlinRed": "你看到的紅方角色",
   "marker.percivalPurple": "梅林或莫甘娜",
   "marker.evilRed": "你的紅方夥伴",
   "marker.unknown": "無法判斷陣營",

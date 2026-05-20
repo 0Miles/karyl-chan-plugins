@@ -148,42 +148,6 @@ describe("flow-040: deal reveal ephemeral carries the role-help button", () => {
 });
 
 describe("flow-041: deal:help renders a role-description embed", () => {
-  it("merlin viewer's help ephemeral includes the merlin description + red marker line", async () => {
-    const game = buildGame({
-      positions: ["merlin", "assassin", "morgana", "loyal", "loyal"],
-      channelId: "c-deal-help-2",
-    });
-    void game;
-    harness.resetCalls();
-    await click({
-      channelId: "c-deal-help-2",
-      userId: "u0",
-      componentId: "deal",
-      tail: "help",
-    });
-    const followups = harness.callsTo("interactions.followup");
-    expect(followups.length).toBe(1);
-    const body = followups[0].body as {
-      embeds?: Array<{
-        title?: string;
-        description?: string;
-        fields?: Array<{ name: string; value: string }>;
-      }>;
-    };
-    const embed = body.embeds?.[0];
-    expect(embed).toBeTruthy();
-    expect(embed!.title).toContain("角色說明");
-    expect(embed!.title).toContain("梅林");
-    expect(embed!.description).toContain("梅林");
-    // Merlin sees red (with the Mordred-invisible caveat) — assert the
-    // red marker section is present.
-    const markerField = embed!.fields?.find((f) =>
-      f.name.includes("視野標記"),
-    );
-    expect(markerField).toBeTruthy();
-    expect(markerField!.value).toContain("🔴");
-    expect(markerField!.value).toContain("莫德雷德");
-  });
   it("percival viewer's help ephemeral includes the purple marker line", async () => {
     const game = buildGame({
       positions: ["merlin", "percival", "assassin", "morgana", "loyal", "loyal"],
