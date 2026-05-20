@@ -12,6 +12,16 @@ export const zhTW = {
   "command.avalon.description": "阿瓦隆桌遊機器人",
   "command.avalon.start.description": "在此頻道開始一場新對局",
   "command.avalon.start.npcOption": "預先加入的 NPC 數量（0–9，可選；用來湊人數）",
+  "command.avalon.start.morganaOption":
+    "是否加入莫甘娜（預設開啟；關閉則由爪牙替代）",
+  "command.avalon.start.percivalOption":
+    "是否加入派西維爾（預設開啟；關閉則由忠臣替代）",
+  "command.avalon.start.mordredOption":
+    "是否加入莫德雷德（預設開啟；7 人以上適用；關閉則由爪牙替代）",
+  "command.avalon.start.oberonOption":
+    "是否加入奧伯倫（預設開啟；10 人適用；關閉則由爪牙替代）",
+  "command.avalon.start.lakeOption":
+    "是否啟用湖中女神（預設開啟；7 人以上才會生效）",
   "command.avalon.card.description": "再次查看你的角色卡與視野",
   "command.avalon.status.description":
     "重新取得當前階段的遊戲板（含按鈕），免去往上翻對話記錄",
@@ -42,11 +52,9 @@ export const zhTW = {
   "stage.signup.fieldCount": "目前人數",
   "stage.signup.fieldRoster": "參加名單",
   "stage.signup.cancelled": "已取消這場對局。",
+  "stage.signup.fieldRules": "規則設定",
   "stage.signup.fieldLady": "湖中女神",
-  "stage.signup.ladyStateOn": "✓ 啟用",
-  "stage.signup.ladyStateOff": "未啟用",
-  "stage.signup.ladyButtonOn": "湖中女神：已啟用",
-  "stage.signup.ladyButtonOff": "啟用湖中女神",
+  "stage.signup.lakeNote": "（7 人以上生效）",
   "stage.signup.fieldNpcRoster": "NPC 名單",
   "stage.signup.fieldNpcCount": "NPC 人數",
   "stage.signup.npcAdd": "+ NPC",

@@ -105,6 +105,53 @@ export function buildPlugin() {
                     ),
                     required: false,
                   },
+                  // Optional rule toggles — all default ON. Switching
+                  // one off swaps that role for a powerless stand-in.
+                  {
+                    type: "boolean",
+                    name: "morgana",
+                    description: t(
+                      undefined,
+                      "command.avalon.start.morganaOption",
+                    ),
+                    required: false,
+                  },
+                  {
+                    type: "boolean",
+                    name: "percival",
+                    description: t(
+                      undefined,
+                      "command.avalon.start.percivalOption",
+                    ),
+                    required: false,
+                  },
+                  {
+                    type: "boolean",
+                    name: "mordred",
+                    description: t(
+                      undefined,
+                      "command.avalon.start.mordredOption",
+                    ),
+                    required: false,
+                  },
+                  {
+                    type: "boolean",
+                    name: "oberon",
+                    description: t(
+                      undefined,
+                      "command.avalon.start.oberonOption",
+                    ),
+                    required: false,
+                  },
+                  {
+                    type: "boolean",
+                    name: "lake",
+                    description: t(
+                      undefined,
+                      "command.avalon.start.lakeOption",
+                    ),
+                    required: false,
+                  },
                 ],
               },
               {
@@ -318,7 +365,20 @@ export function buildPlugin() {
                 typeof rawNpc === "number" && Number.isFinite(rawNpc)
                   ? Math.floor(rawNpc)
                   : 0;
-              return startSignup(ctx, guildId, channelId, { npcCount });
+              // Rule toggles default ON: an omitted option (undefined)
+              // and an explicit `true` both enable the role; only an
+              // explicit `false` switches it off.
+              const enabled = (v: unknown): boolean => v !== false;
+              return startSignup(ctx, guildId, channelId, {
+                npcCount,
+                roleToggles: {
+                  morgana: enabled(ctx.options.morgana),
+                  percival: enabled(ctx.options.percival),
+                  mordred: enabled(ctx.options.mordred),
+                  oberon: enabled(ctx.options.oberon),
+                },
+                lakeEnabled: enabled(ctx.options.lake),
+              });
             },
           }),
         ],

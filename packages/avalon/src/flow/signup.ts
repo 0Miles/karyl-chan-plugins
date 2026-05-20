@@ -19,6 +19,10 @@ import {
   newGameState,
   type GameState,
 } from "../game/state.js";
+import {
+  DEFAULT_ROLE_TOGGLES,
+  type RoleToggles,
+} from "../game/roles.js";
 import { editMessage, sendMessage } from "./discord.js";
 import { renderDealReveal, sendDealBoard } from "./stages.js";
 import { sampleNpcDisplayNames } from "../npc/names.js";
@@ -49,14 +53,17 @@ interface Signup {
    */
   npcs: Array<{ userId: string; displayName: string }>;
   /**
-   * Host-toggled at signup time via the `sig:lady` button. Surfaces in
-   * the UI only when player count ≥ LADY_MIN_PLAYERS (Avalon rulebook
-   * gates Lady-of-the-Lake to 7+ player tables). The handler resolves
-   * the effective ladyEnabled on start so a stale `true` on a roster
-   * that dropped below the threshold doesn't enable a lake that can
-   * never fire.
+   * Optional special roles, fixed by the `/avalon start` options.
+   * Threaded into the GameState verbatim at start time.
    */
-  ladyEnabled: boolean;
+  roleToggles: RoleToggles;
+  /**
+   * Whether the host asked for Lady-of-the-Lake at `/avalon start`.
+   * Only takes effect if the final roster reaches LADY_MIN_PLAYERS —
+   * the rulebook gates the lake to 7+ player tables — so the handler
+   * resolves the effective value when the game is dealt.
+   */
+  lakeEnabled: boolean;
 }
 
 const signups = new Map<string, Signup>();
@@ -73,10 +80,10 @@ const MAX_PLAYERS = 10;
 
 /**
  * Lady-of-the-Lake is only legal at 7+ player tables per the
- * rulebook. The toggle button is hidden below this threshold; if a
- * roster drops below it after toggling on, the effective value is
- * forced false at start so we don't dump a dead `ladyEnabled` flag
- * onto the GameState.
+ * rulebook. The host opts in via the `/avalon start lake:` option;
+ * `handleStartClick` forces the effective value false if the final
+ * roster never reaches this threshold, so we don't dump a dead
+ * `ladyEnabled` flag onto the GameState.
  */
 const LADY_MIN_PLAYERS = 7;
 
@@ -85,7 +92,6 @@ export type SignupAction =
   | "leave"
   | "start"
   | "cancel"
-  | "lady"
   | "npc+"
   | "npc-";
 
@@ -98,12 +104,20 @@ export async function startSignup(
   ctx: CommandContext,
   guildId: string,
   channelId: string,
-  opts: { npcCount?: number } = {},
+  opts: {
+    npcCount?: number;
+    /** Optional special roles; defaults to all enabled. */
+    roleToggles?: RoleToggles;
+    /** Lady-of-the-Lake opt-in; defaults to enabled (7+ tables only). */
+    lakeEnabled?: boolean;
+  } = {},
 ): Promise<CommandReply> {
   return withChannelLock(channelId, async () => {
     if (getGame(channelId) || signups.has(channelId)) {
       return t(undefined, "error.alreadyRunning");
     }
+    const roleToggles = opts.roleToggles ?? DEFAULT_ROLE_TOGGLES;
+    const lakeEnabled = opts.lakeEnabled ?? true;
     const hostMention = `<@${ctx.userId}>`;
     // Cap the upfront NPC count so a single user can't spawn 50 seats
     // — the engine's MAX_PLAYERS clamps the roster total anyway, but
@@ -119,22 +133,18 @@ export async function startSignup(
       userId: `${NPC_USERID_PREFIX}${i}`,
       displayName,
     }));
-    // Initial board: host + seeded NPCs in the roster. The lady
-    // toggle is unlocked straight away if the seeded roster already
-    // hits the 7-player threshold (e.g. `/avalon start npc:6`).
+    // Initial board: host + seeded NPCs in the roster.
     const initialTotal = 1 + initialNpcs.length;
-    const initialLadyUnlocked = initialTotal >= LADY_MIN_PLAYERS;
     const sent = await sendMessage({
       channelId,
       embeds: [renderSignupEmbed(hostMention, [ctx.userDisplayName], {
         npcNames: initialNpcs.map((n) => n.displayName),
-        ladyEnabled: false,
+        roleToggles,
+        lakeEnabled,
       })],
       components: signupComponents({
         canStart:
           initialTotal >= MIN_PLAYERS && initialTotal <= MAX_PLAYERS,
-        ladyUnlocked: initialLadyUnlocked,
-        ladyEnabled: false,
         canAddNpc: initialTotal < MAX_PLAYERS,
         canRemoveNpc: initialNpcs.length > 0,
       }),
@@ -150,7 +160,8 @@ export async function startSignup(
       messageId: sent.id,
       players: new Map([[ctx.userId, ctx.userDisplayName]]),
       npcs: initialNpcs,
-      ladyEnabled: false,
+      roleToggles,
+      lakeEnabled,
     });
     return {
       embeds: [
@@ -193,8 +204,6 @@ export async function handleSignupClick(
       return handleStartClick(ctx, signup);
     case "cancel":
       return handleCancelClick(ctx, signup);
-    case "lady":
-      return handleLadyClick(ctx, signup);
     case "npc+":
       return handleNpcAddClick(ctx, signup);
     case "npc-":
@@ -240,33 +249,6 @@ async function handleNpcRemoveClick(
   if (ctx.userId !== signup.hostUserId) return null;
   if (signup.npcs.length === 0) return null;
   signup.npcs.pop();
-  // Mirror handleLeaveClick: if the roster drops below the lady
-  // threshold, clear the toggle so a re-add doesn't silently inherit
-  // a stale `true` for a freshly-composed roster.
-  if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
-    signup.ladyEnabled = false;
-  }
-  await refreshSignupMessage(signup.channelId);
-  return null;
-}
-
-/**
- * Host-only toggle for the Lady-of-the-Lake mechanic. Only meaningful
- * once the roster hits LADY_MIN_PLAYERS; the toggle button is hidden
- * below that. Non-host clicks ephemeral-reject the same as start /
- * cancel; under-quota clicks ephemeral with "需要 7 人才能啟用".
- */
-async function handleLadyClick(
-  ctx: ComponentContext,
-  signup: Signup,
-): Promise<ComponentReply> {
-  // Non-host clicks and under-quota clicks are no-ops — drop silently
-  // (the toggle button only renders at all once the roster hits 7).
-  if (ctx.userId !== signup.hostUserId) return null;
-  if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
-    return null;
-  }
-  signup.ladyEnabled = !signup.ladyEnabled;
   await refreshSignupMessage(signup.channelId);
   return null;
 }
@@ -302,14 +284,6 @@ async function handleLeaveClick(
   // The host can leave the roster but the session stays under their
   // control — they still own the start / cancel buttons.
   signup.players.delete(ctx.userId);
-  // Lady-of-the-Lake is only legal at 7+. If we drop below the
-  // threshold after a leave, force the toggle back to false so a
-  // later re-join doesn't silently inherit a stale `true` for a
-  // freshly-composed roster (H-1: the host hasn't re-confirmed
-  // their intent for the new player mix).
-  if (signup.players.size + signup.npcs.length < LADY_MIN_PLAYERS) {
-    signup.ladyEnabled = false;
-  }
   await refreshSignupMessage(signup.channelId);
   return null;
 }
@@ -324,13 +298,11 @@ async function handleStartClick(
   if (ctx.userId !== signup.hostUserId) return null;
   const totalSize = signup.players.size + signup.npcs.length;
   if (totalSize < MIN_PLAYERS) return null;
-  // B-003: Lady-of-the-Lake toggle is now exposed via the `sig:lady`
-  // button on the signup board. Effective value is gated by
-  // LADY_MIN_PLAYERS — a stale `true` on a roster that dropped below
-  // the threshold forces back to false so we don't ship a dead flag
-  // into the GameState.
+  // Lady-of-the-Lake was opted in via `/avalon start lake:`. It only
+  // fires on 7+ tables, so a smaller final roster forces the
+  // effective value false rather than shipping a dead flag.
   const effectiveLady =
-    signup.ladyEnabled && totalSize >= LADY_MIN_PLAYERS;
+    signup.lakeEnabled && totalSize >= LADY_MIN_PLAYERS;
   const game = newGameState({
     guildId: signup.guildId,
     channelId: signup.channelId,
@@ -345,6 +317,7 @@ async function handleStartClick(
       ...signup.npcs,
     ],
     ladyEnabled: effectiveLady,
+    roleToggles: signup.roleToggles,
   });
   deal(game);
   setGame(signup.channelId, game);
@@ -393,14 +366,35 @@ async function handleCancelClick(
 
 // ── rendering ───────────────────────────────────────────────────────────
 
+/**
+ * One-line-per-side summary of the rules picked at `/avalon start`:
+ * the four optional roles, then Lady-of-the-Lake. ✓ = in play,
+ * ✗ = replaced by a powerless stand-in (or, for the lake, off).
+ */
+function renderRulesValue(
+  roleToggles: RoleToggles,
+  lakeEnabled: boolean,
+): string {
+  const mark = (on: boolean): string => (on ? "✓" : "✗");
+  const roleLine = [
+    `${t(undefined, "role.morgana")} ${mark(roleToggles.morgana)}`,
+    `${t(undefined, "role.percival")} ${mark(roleToggles.percival)}`,
+    `${t(undefined, "role.mordred")} ${mark(roleToggles.mordred)}`,
+    `${t(undefined, "role.oberon")} ${mark(roleToggles.oberon)}`,
+  ].join("　");
+  const lakeLine =
+    `${t(undefined, "stage.signup.fieldLady")} ${mark(lakeEnabled)}` +
+    `${lakeEnabled ? t(undefined, "stage.signup.lakeNote") : ""}`;
+  return `${roleLine}\n${lakeLine}`;
+}
+
 function renderSignupEmbed(
   hostMention: string,
   names: string[],
   opts: {
-    ladyEnabled: boolean;
+    roleToggles: RoleToggles;
+    lakeEnabled: boolean;
     npcNames?: string[];
-  } = {
-    ladyEnabled: false,
   },
 ) {
   const npcNames = opts.npcNames ?? [];
@@ -419,15 +413,12 @@ function renderSignupEmbed(
       inline: true,
     });
   }
-  // Lady-of-the-Lake state is always shown — the toggle button is
-  // always present (just disabled below 7 players), so the field
-  // pairs with it.
+  // Rule settings (optional roles + lake) are fixed at `/avalon start`
+  // time — shown read-only so joiners see the table they're entering.
   fields.push({
-    name: t(undefined, "stage.signup.fieldLady"),
-    value: opts.ladyEnabled
-      ? t(undefined, "stage.signup.ladyStateOn")
-      : t(undefined, "stage.signup.ladyStateOff"),
-    inline: true,
+    name: t(undefined, "stage.signup.fieldRules"),
+    value: renderRulesValue(opts.roleToggles, opts.lakeEnabled),
+    inline: false,
   });
   if (names.length > 0) {
     fields.push({
@@ -454,9 +445,6 @@ function renderSignupEmbed(
 
 function signupComponents(opts: {
   canStart: boolean;
-  /** Whether the lady toggle is clickable — true once the roster ≥ 7. */
-  ladyUnlocked: boolean;
-  ladyEnabled: boolean;
   canAddNpc: boolean;
   canRemoveNpc: boolean;
 }) {
@@ -493,19 +481,6 @@ function signupComponents(opts: {
       label: t(undefined, "stage.signup.cancel"),
     },
   ];
-  // Lady-of-the-Lake toggle is always shown. It stays disabled below
-  // the rulebook's 7-player threshold and unlocks once the roster
-  // reaches it. Green when active, grey when off — mirrors the radio
-  // plugin's loop-mode toggle convention.
-  row1.push({
-    type: 2 as const,
-    style: opts.ladyEnabled ? (3 as const) : (2 as const),
-    custom_id: componentCustomId(PLUGIN_KEY, "sig", "lady"),
-    label: opts.ladyEnabled
-      ? t(undefined, "stage.signup.ladyButtonOn")
-      : t(undefined, "stage.signup.ladyButtonOff"),
-    disabled: !opts.ladyUnlocked,
-  });
   // NPC +/− on their own row so the primary controls stay in row 1.
   // Discord allows up to 5 action rows per message; signup uses 2.
   const row2: Array<{
@@ -543,20 +518,18 @@ async function refreshSignupMessage(channelId: string): Promise<void> {
   const npcNames = signup.npcs.map((n) => n.displayName);
   const total = names.length + npcNames.length;
   const hostMention = `<@${signup.hostUserId}>`;
-  const ladyUnlocked = total >= LADY_MIN_PLAYERS;
   await editMessage({
     channelId,
     messageId: signup.messageId,
     embeds: [
       renderSignupEmbed(hostMention, names, {
-        ladyEnabled: signup.ladyEnabled,
+        roleToggles: signup.roleToggles,
+        lakeEnabled: signup.lakeEnabled,
         npcNames,
       }),
     ],
     components: signupComponents({
       canStart: total >= MIN_PLAYERS && total <= MAX_PLAYERS,
-      ladyUnlocked,
-      ladyEnabled: signup.ladyEnabled,
       canAddNpc: total < MAX_PLAYERS,
       canRemoveNpc: signup.npcs.length > 0,
     }),

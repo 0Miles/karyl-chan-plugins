@@ -3,9 +3,11 @@ import {
   installFakeRuntime,
   resetWorldState,
   fakeClickContext,
+  getGame,
   type InstalledHarness,
 } from "./_harness.js";
-import { handleSignupClick } from "../flow/signup.js";
+import { handleSignupClick, startSignup } from "../flow/signup.js";
+import type { RoleToggles } from "../game/roles.js";
 
 let harness: InstalledHarness;
 
@@ -26,7 +28,10 @@ afterEach(() => {
  * We need to create the signup with 4 join clicks (the host auto-joins
  * makes 5 — so we use 3 fresh joins for a total of 4 including host).
  */
-async function buildSignupWith(playerCount: number): Promise<void> {
+async function buildSignupWith(
+  playerCount: number,
+  opts: { roleToggles?: RoleToggles; lakeEnabled?: boolean } = {},
+): Promise<void> {
   // First message: someone has to start the signup. We can't easily
   // route through /avalon start without a full CommandContext, so we
   // simulate via an artificial first join that creates the signup. The
@@ -55,7 +60,6 @@ async function buildSignupWith(playerCount: number): Promise<void> {
   // signups Map is private; instead use the actual flow:
   // 1. fake a "first join" by calling startSignup through a tiny
   //    CommandContext shim. We'll do it inline.
-  const { startSignup } = await import("../flow/signup.js");
   // CommandContext requires many fields; we pass the minimum.
   const ctx = {
     pluginKey: "karyl-avalon",
@@ -77,7 +81,7 @@ async function buildSignupWith(playerCount: number): Promise<void> {
     publicBaseUrl: undefined,
     botRpc: async () => null,
   } as unknown as Parameters<typeof startSignup>[0];
-  await startSignup(ctx, "g", "c-signup");
+  await startSignup(ctx, "g", "c-signup", opts);
 
   for (let i = 1; i < playerCount; i++) {
     await handleSignupClick(
@@ -130,103 +134,78 @@ describe("B-001: 5-player signup → host start triggers deal + deal board send"
   });
 });
 
-describe("B-003: lady-of-the-lake toggle on signup", () => {
-  it("6-player signup: lady button is rejected (under threshold)", async () => {
-    await buildSignupWith(6);
-    harness.resetCalls();
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u0",
-        componentId: "sig",
-        tail: "lady",
-      }),
-      "lady",
-    );
-    // Under threshold — silent no-op: no board repaint.
-    expect(harness.callsTo("messages.edit").length).toBe(0);
-  });
-  it("7-player signup: host toggles lady on, then off", async () => {
+async function startGame(): Promise<void> {
+  await handleSignupClick(
+    fakeClickContext({
+      channelId: "c-signup",
+      userId: "u0",
+      componentId: "sig",
+      tail: "start",
+    }),
+    "start",
+  );
+}
+
+describe("start options: lake opt-in flows from /avalon start", () => {
+  it("default 7-player start → Lady of the Lake enabled", async () => {
     await buildSignupWith(7);
-    harness.resetCalls();
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u0",
-        componentId: "sig",
-        tail: "lady",
-      }),
-      "lady",
-    );
-    // Board repainted to show the new lady state.
-    expect(harness.callsTo("messages.edit").length).toBeGreaterThan(0);
-    harness.resetCalls();
-    // Toggle off → board repaints again.
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u0",
-        componentId: "sig",
-        tail: "lady",
-      }),
-      "lady",
-    );
-    expect(harness.callsTo("messages.edit").length).toBeGreaterThan(0);
+    await startGame();
+    expect(getGame("c-signup")?.ladyEnabled).toBe(true);
   });
-  it("non-host lady click is a silent no-op", async () => {
-    await buildSignupWith(7);
-    harness.resetCalls();
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u3", // not host
-        componentId: "sig",
-        tail: "lady",
-      }),
-      "lady",
-    );
-    // No board repaint, no ephemeral for a rejected click.
-    expect(harness.callsTo("messages.edit").length).toBe(0);
-    expect(harness.callsTo("interactions.followup").length).toBe(0);
+  it("lake:false on a 7-player table → Lady disabled, no button to flip", async () => {
+    await buildSignupWith(7, { lakeEnabled: false });
+    await startGame();
+    expect(getGame("c-signup")?.ladyEnabled).toBe(false);
   });
-  it("leaving below 7 players forces ladyEnabled back to false", async () => {
-    // H-1: stale-true UX guard. 7p → toggle on → one leaves (n=6 →
-    // button hidden) → another joins (n=7 again → button reappears).
-    // After the leave step, ladyEnabled must be false; otherwise the
-    // restored button silently shows "已啟用" for a freshly-composed
-    // roster the host hasn't re-confirmed.
+  it("lake:true but only 6 players → Lady forced off (7+ only)", async () => {
+    await buildSignupWith(6, { lakeEnabled: true });
+    await startGame();
+    expect(getGame("c-signup")?.ladyEnabled).toBe(false);
+  });
+});
+
+describe("start options: role toggles flow into the dealt deck", () => {
+  const positionsOf = (): string[] =>
+    getGame("c-signup")?.players.map((p) => p.position) ?? [];
+
+  it("default 7-player start deals every optional role", async () => {
     await buildSignupWith(7);
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u0",
-        componentId: "sig",
-        tail: "lady",
-      }),
-      "lady",
-    );
-    // u6 leaves
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u6",
-        componentId: "sig",
-        tail: "leave",
-      }),
-      "leave",
-    );
-    // Re-toggle on at 6 should still be rejected (under threshold).
-    harness.resetCalls();
-    await handleSignupClick(
-      fakeClickContext({
-        channelId: "c-signup",
-        userId: "u0",
-        componentId: "sig",
-        tail: "lady",
-      }),
-      "lady",
-    );
-    // Under threshold — silent no-op: board NOT repainted.
-    expect(harness.callsTo("messages.edit").length).toBe(0);
+    await startGame();
+    const positions = positionsOf();
+    expect(positions).toContain("percival");
+    expect(positions).toContain("morgana");
+    expect(positions).toContain("mordred");
+    expect(positions).not.toContain("minion");
+  });
+
+  it("morgana:false → no Morgana dealt, a Minion takes the seat", async () => {
+    await buildSignupWith(7, {
+      roleToggles: {
+        percival: true,
+        morgana: false,
+        mordred: true,
+        oberon: true,
+      },
+      lakeEnabled: true,
+    });
+    await startGame();
+    const positions = positionsOf();
+    expect(positions).not.toContain("morgana");
+    expect(positions).toContain("minion");
+    expect(positions).toContain("mordred");
+  });
+
+  it("percival:false → no Percival dealt, dealt as a Loyal Servant", async () => {
+    await buildSignupWith(7, {
+      roleToggles: {
+        percival: false,
+        morgana: true,
+        mordred: true,
+        oberon: true,
+      },
+      lakeEnabled: true,
+    });
+    await startGame();
+    expect(positionsOf()).not.toContain("percival");
   });
 });
