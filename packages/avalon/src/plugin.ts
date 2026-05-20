@@ -200,12 +200,6 @@ export function buildPlugin() {
                 };
               }
               if (sub === "status") {
-                // Re-surface the current stage's board so players
-                // don't have to scroll the channel back past a text
-                // discussion to find it. Default: a private
-                // (ephemeral) copy. `public:true` (host/admin only)
-                // deletes the stale public board and re-posts a
-                // fresh one at the bottom of the channel.
                 return withChannelLock(channelId, async () => {
                   const game = getGame(channelId);
                   if (!game || !game.current) {
@@ -215,12 +209,10 @@ export function buildPlugin() {
                     };
                   }
                   const wantsPublic = ctx.options.public === true;
-                  // Gate before rendering: public is host/admin-only,
-                  // the private copy is for seated players. The whole
-                  // handler runs under withChannelLock, which also
-                  // serialises every component click + NPC tick on
-                  // this channel — so `game.current` can't be cleared
-                  // out from under us across the awaits below.
+                  // withChannelLock serialises this handler against
+                  // every component click + NPC tick on the channel,
+                  // so `game.current` stays stable across the awaits
+                  // below — no re-fetch / re-guard needed.
                   if (wantsPublic) {
                     if (
                       game.hostUserId !== ctx.userId &&
@@ -275,9 +267,8 @@ export function buildPlugin() {
                       ephemeral: true,
                     };
                   }
-                  // Default: a private copy. Buttons still work — a
-                  // click drives the public board — but this copy
-                  // won't repaint, so it's a snapshot, not a live view.
+                  // The ephemeral copy's buttons still drive the real
+                  // game, but it never repaints — it's a snapshot.
                   return {
                     embeds: board.embeds,
                     components: board.components,

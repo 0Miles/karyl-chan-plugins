@@ -38,10 +38,7 @@ import {
   privateVoteComponents,
 } from "./stages-privatevote.js";
 import { lakeBoardPayload } from "./stages-lake.js";
-import {
-  renderAssassinateEmbed,
-  assassinateComponents,
-} from "./stages-assassinate.js";
+import { assassinateBoardPayload } from "./stages-assassinate.js";
 import { findArt, findVariantArt, isVariantPosition } from "../art.js";
 import { runtime } from "./runtime.js";
 
@@ -346,14 +343,8 @@ export async function renderCurrentStageBoard(state: GameState): Promise<{
       };
     case "lake":
       return lakeBoardPayload(state);
-    case "assassinate": {
-      const assassin = state.players.find((p) => p.position === "assassin");
-      if (!assassin) return null;
-      return {
-        embeds: [renderAssassinateEmbed(assassin.displayName)],
-        components: assassinateComponents(state),
-      };
-    }
+    case "assassinate":
+      return assassinateBoardPayload(state);
   }
 }
 

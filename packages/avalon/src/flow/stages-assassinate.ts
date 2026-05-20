@@ -18,6 +18,7 @@ import {
   sendMessage,
   type DiscordActionRow,
   type DiscordButton,
+  type DiscordEmbed,
 } from "./discord.js";
 import { truncate, viewCardButtonRow } from "./presentation.js";
 import { runtime } from "./runtime.js";
@@ -33,12 +34,28 @@ import { scheduleNpcStep } from "../npc/driver.js";
  *    shot and what their real role was), then `settleAssassinate`
  *    decides whether evil flips the win or Arthur takes it.
  */
+/**
+ * Build the assassinate stage's public board payload. Single source
+ * of truth for the board — `openAssassinate` posts it, `/avalon
+ * status` re-renders it. Returns null only if the deck has no
+ * assassin (impossible on a legal table).
+ */
+export function assassinateBoardPayload(state: GameState): {
+  embeds: DiscordEmbed[];
+  components: DiscordActionRow[];
+} | null {
+  const assassin = state.players.find((p) => p.position === "assassin");
+  if (!assassin) return null;
+  return {
+    embeds: [renderAssassinateEmbed(assassin.displayName)],
+    components: assassinateComponents(state),
+  };
+}
+
 export async function openAssassinate(state: GameState): Promise<void> {
   state.stage = "assassinate";
-  const assassin = state.players.find((p) => p.position === "assassin");
-  if (!assassin) {
-    // Should be impossible — every legal Avalon table has an assassin.
-    // Bail to ending with the missions verdict that's already in hand.
+  const payload = assassinateBoardPayload(state);
+  if (!payload) {
     runtime().log.error("avalon: no assassin in deck on assassinate stage", {
       channelId: state.channelId,
       stage: "assassinate",
@@ -47,8 +64,7 @@ export async function openAssassinate(state: GameState): Promise<void> {
   }
   const sent = await sendMessage({
     channelId: state.channelId,
-    embeds: [renderAssassinateEmbed(assassin.displayName)],
-    components: assassinateComponents(state),
+    ...payload,
   });
   if (!sent) {
     runtime().log.error("avalon: failed to open assassinate stage", {
@@ -105,7 +121,7 @@ export async function handleAssassinateClick(
 
 // ── rendering ──────────────────────────────────────────────────────────
 
-export function renderAssassinateEmbed(assassinName: string) {
+function renderAssassinateEmbed(assassinName: string) {
   return {
     title: t(undefined, "stage.assassinate.title"),
     description: t(undefined, "stage.assassinate.content", {
@@ -115,7 +131,7 @@ export function renderAssassinateEmbed(assassinName: string) {
   };
 }
 
-export function assassinateComponents(state: GameState): DiscordActionRow[] {
+function assassinateComponents(state: GameState): DiscordActionRow[] {
   // Show every non-assassin seat. We deliberately don't pre-filter
   // out the assassin's own faction here — doing so would leak Oberon
   // (who's evil but invisible to other evil) to the assassin.
