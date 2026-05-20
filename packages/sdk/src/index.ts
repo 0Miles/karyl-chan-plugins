@@ -33,6 +33,7 @@ export type {
   CommandOption,
   InteractionContext,
   Logger,
+  MessageAttachment,
   WebhookPayload,
   ComponentContext,
   ComponentReply,

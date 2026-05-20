@@ -170,12 +170,14 @@ async function respondToInteraction(
   ephemeral: boolean,
   embeds?: unknown[],
   components?: unknown[],
+  attachments?: unknown[],
 ): Promise<void> {
   await callBotRpc(log, botUrl, token, "/api/plugin/interactions.respond", {
     interaction_token: interactionToken,
     ...(content !== undefined ? { content } : {}),
     ...(embeds !== undefined ? { embeds } : {}),
     ...(components !== undefined ? { components } : {}),
+    ...(attachments !== undefined ? { attachments } : {}),
     ephemeral,
   });
 }
@@ -188,12 +190,13 @@ function readOpts(payload: InteractionPayload): Record<string, unknown> {
   return out;
 }
 
-/** Normalize a CommandReply to { content, ephemeral, embeds, components }. */
+/** Normalize a CommandReply to { content, ephemeral, embeds, components, attachments }. */
 function normalizeReply(reply: CommandReply): {
   content: string | undefined;
   ephemeral: boolean;
   embeds: unknown[] | undefined;
   components: unknown[] | undefined;
+  attachments: unknown[] | undefined;
 } {
   if (typeof reply === "string") {
     return {
@@ -201,6 +204,7 @@ function normalizeReply(reply: CommandReply): {
       ephemeral: false,
       embeds: undefined,
       components: undefined,
+      attachments: undefined,
     };
   }
   return {
@@ -208,6 +212,7 @@ function normalizeReply(reply: CommandReply): {
     ephemeral: reply.ephemeral ?? false,
     embeds: reply.embeds,
     components: reply.components,
+    attachments: reply.attachments,
   };
 }
 
@@ -324,7 +329,7 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
 
       try {
         const rawReply = await handler(ctx);
-        const { content, ephemeral, embeds, components } =
+        const { content, ephemeral, embeds, components, attachments } =
           normalizeReply(rawReply);
         await respondToInteraction(
           server.log,
@@ -335,6 +340,7 @@ export function createPluginServer(opts: PluginServerOptions): FastifyInstance {
           ephemeral,
           embeds,
           components,
+          attachments,
         );
       } catch (err) {
         server.log.error({ err }, "command handler threw");

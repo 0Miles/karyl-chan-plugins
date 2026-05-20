@@ -72,6 +72,25 @@ export interface CommandContext {
 }
 
 /**
+ * A file the bot attaches to a message on the plugin's behalf.
+ * `path` is a path on the plugin's own HTTP surface (e.g.
+ * `/art/card.png`); the bot fetches `<plugin.url><path>` over the
+ * internal bot↔plugin network and uploads the bytes to Discord as a
+ * real attachment. An embed references it via
+ * `image: { url: "attachment://<name>" }`.
+ *
+ * This lets a plugin embed images without exposing a
+ * Discord-reachable public URL — useful for local-dev / tunnelless
+ * deployments where the bot's WEB_BASE_URL isn't internet-routable.
+ */
+export interface MessageAttachment {
+  /** Attachment filename — must match the `attachment://<name>` ref. */
+  name: string;
+  /** Leading-slash path on the plugin's HTTP surface. */
+  path: string;
+}
+
+/**
  * What a command handler may return.
  * A plain string is shorthand for `{ content: string }`.
  * `embeds` / `components` are passed through to the bot's
@@ -87,6 +106,7 @@ export type CommandReply =
       embeds?: unknown[];
       components?: unknown[];
       ephemeral?: boolean;
+      attachments?: MessageAttachment[];
     };
 
 /** A single option definition attached to a command. */
