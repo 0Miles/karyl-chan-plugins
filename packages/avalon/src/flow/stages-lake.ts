@@ -20,6 +20,7 @@ import {
   toastEphemeral,
   sendMessage,
   type DiscordActionRow,
+  type DiscordAttachment,
   type DiscordButton,
   type DiscordEmbed,
 } from "./discord.js";
@@ -31,16 +32,19 @@ import { endGame } from "./stages-ending.js";
 import { scheduleNpcStep } from "../npc/driver.js";
 
 /**
- * Resolve the optional lake-of-the-lady thumbnail URL. Returns
- * undefined when the admin hasn't uploaded one; callers spread the
- * resulting object so a missing thumbnail simply omits the embed
- * field (same pattern as renderDealReveal).
+ * Resolve the optional lake-of-the-lady asset into a thumbnail-ref
+ * + attachment descriptor. Returns undefined when the admin hasn't
+ * uploaded one. The asset ships as a real attachment so it renders
+ * without a Discord-reachable public URL.
  */
-async function lakeThumbnail(): Promise<{ url: string } | undefined> {
+async function lakeThumbnail(): Promise<
+  { thumbnail: { url: string }; attachment: DiscordAttachment } | undefined
+> {
   const art = await findAsset("lake").catch(() => null);
   if (!art) return undefined;
   return {
-    url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}`,
+    thumbnail: { url: `attachment://${art.filename}` },
+    attachment: { name: art.filename, path: `/art/${art.filename}` },
   };
 }
 
@@ -64,11 +68,12 @@ export async function openLake(state: GameState): Promise<void> {
   if (state.ladyHolderIndex === null) return;
   const holder = playerByIndex(state, state.ladyHolderIndex);
   if (!holder) return;
-  const thumbnail = await lakeThumbnail();
+  const lakeArt = await lakeThumbnail();
   const sent = await sendMessage({
     channelId: state.channelId,
-    embeds: [withThumbnail(renderLakeEmbed(state, holder.displayName), thumbnail)],
+    embeds: [withThumbnail(renderLakeEmbed(state, holder.displayName), lakeArt)],
     components: lakeComponents(state),
+    ...(lakeArt ? { attachments: [lakeArt.attachment] } : {}),
   });
   if (!sent) {
     runtime().log.error("avalon: failed to open lake stage", {
@@ -86,12 +91,12 @@ export async function openLake(state: GameState): Promise<void> {
   scheduleNpcStep(state);
 }
 
-/** Returns the embed with the thumbnail set when present. */
+/** Returns the embed with the lake thumbnail set when present. */
 function withThumbnail(
   embed: DiscordEmbed,
-  thumbnail: { url: string } | undefined,
+  lakeArt: { thumbnail: { url: string } } | undefined,
 ): DiscordEmbed {
-  return thumbnail ? { ...embed, thumbnail } : embed;
+  return lakeArt ? { ...embed, thumbnail: lakeArt.thumbnail } : embed;
 }
 
 export async function handleLakeClick(
@@ -139,7 +144,7 @@ export async function handleLakeClick(
   // public board's text neutral ("X 用湖中女神查驗了 Y") so
   // bystanders can't infer the faction.
   const faction = factionOf(target);
-  const thumbnail = await lakeThumbnail();
+  const lakeArt = await lakeThumbnail();
   await followupEphemeral({
     interactionToken: ctx.interactionToken,
     embeds: [
@@ -155,9 +160,10 @@ export async function handleLakeClick(
                 : t(undefined, "faction.mordred"),
           }),
         },
-        thumbnail,
+        lakeArt,
       ),
     ],
+    ...(lakeArt ? { attachments: [lakeArt.attachment] } : {}),
   });
 
   // Transfer the token to the inspected player. Mark the old holder so
@@ -166,6 +172,9 @@ export async function handleLakeClick(
   game.ladyHolderIndex = target.index;
   game.ladyUseCount++;
 
+  // The board keeps the attachment posted by openLake — a message
+  // edit that omits `attachments` retains the existing files, so the
+  // embed's `attachment://` ref still resolves.
   await editMessage({
     channelId: game.channelId,
     messageId: game.current.messageId,
@@ -179,7 +188,7 @@ export async function handleLakeClick(
             target: `**${target.displayName}**`,
           }),
         },
-        thumbnail,
+        lakeArt,
       ),
     ],
     components: [],

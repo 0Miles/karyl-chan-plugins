@@ -9,9 +9,13 @@ import {
 import { ROLES } from "../game/roles.js";
 import { removeGame } from "../game/store.js";
 import { findArt, findVariantArt, isVariantPosition } from "../art.js";
-import { sendMessage, type DiscordEmbed } from "./discord.js";
+import {
+  artAttachment,
+  sendMessage,
+  type DiscordAttachment,
+  type DiscordEmbed,
+} from "./discord.js";
 import { FACTION_COLOR, missionProgressLine } from "./presentation.js";
-import { runtime } from "./runtime.js";
 import { clearNpcTimer } from "../npc/driver.js";
 
 /**
@@ -36,7 +40,7 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
   const arthurWin = verdict.winner === "arthur";
 
   const mvp = computeMvp(state, verdict);
-  const mvpImage = mvp ? await resolveMvpImage(state, mvp) : undefined;
+  const mvpCard = mvp ? await resolveMvpCard(state, mvp) : undefined;
 
   const embed: DiscordEmbed = {
     title: arthurWin
@@ -56,9 +60,13 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
         inline: false,
       },
     ],
-    ...(mvpImage ? { image: mvpImage } : {}),
+    ...(mvpCard ? { image: mvpCard.image } : {}),
   };
-  await sendMessage({ channelId: state.channelId, embeds: [embed] });
+  await sendMessage({
+    channelId: state.channelId,
+    embeds: [embed],
+    ...(mvpCard ? { attachments: [mvpCard.attachment] } : {}),
+  });
   // The session is over; future `/avalon start` re-creates fresh
   // state. We keep the per-channel sign-up map separate (see
   // signup.ts) so its lifecycle isn't entangled.
@@ -92,17 +100,18 @@ function reasonText(verdict: Verdict): string {
 }
 
 /**
- * Resolve the MVP's card art URL. Uses the same art store as the
- * deal-reveal ephemeral: variant positions (loyal / minion) pick
- * the variant indexed by the MVP's seat-rank among same-role
- * players; single-image positions go through `findArt`. Returns
- * undefined when no art is uploaded for the MVP's slot — caller
- * simply omits the embed image then.
+ * Resolve the MVP's card art into an `{ image, attachment }` pair.
+ * Uses the same art store as the deal-reveal ephemeral: variant
+ * positions (loyal / minion) pick the variant indexed by the MVP's
+ * seat-rank among same-role players; single-image positions go
+ * through `findArt`. The art ships as a real attachment so it
+ * renders without a Discord-reachable public URL. Returns undefined
+ * when no art is uploaded for the MVP's slot.
  */
-async function resolveMvpImage(
+async function resolveMvpCard(
   state: GameState,
   mvp: Player,
-): Promise<{ url: string } | undefined> {
+): Promise<{ image: { url: string }; attachment: DiscordAttachment } | undefined> {
   let art: { filename: string; etag: string } | null;
   if (isVariantPosition(mvp.position)) {
     // Inline seat-rank-among-same-role so we don't reach into
@@ -119,7 +128,5 @@ async function resolveMvpImage(
     art = await findArt(mvp.position).catch(() => null);
   }
   if (!art) return undefined;
-  return {
-    url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}`,
-  };
+  return artAttachment(art.filename);
 }

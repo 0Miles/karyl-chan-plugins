@@ -62,10 +62,9 @@ services:
       PLUGIN_URL: http://karyl-avalon-plugin:3000
       KARYL_PLUGIN_SETUP_SECRET: ${KARYL_PLUGIN_SETUP_SECRET_AVALON:-}
       AVALON_ART_DIR: /app/data/art
-      # Override for the URL embedded in role-card / MVP-card image
-      # tags so Discord can fetch the asset. Falls back to the bot's
-      # WEB_BASE_URL when unset — that only works if the bot's URL is
-      # publicly reachable (not http://localhost:*). See .env.example.
+      # Optional base-URL override for the admin "manage" WebUI link.
+      # Role-card / MVP-card images don't need it — they ship as
+      # Discord attachments. See .env.example.
       AVALON_PUBLIC_URL: ${AVALON_PUBLIC_URL:-}
     volumes:
       - avalon-art:/app/data/art

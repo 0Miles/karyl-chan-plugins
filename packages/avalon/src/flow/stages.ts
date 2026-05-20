@@ -10,10 +10,12 @@ import { ROLES, type Position } from "../game/roles.js";
 import { buildVision } from "../game/vision.js";
 import { getGame } from "../game/store.js";
 import {
+  artAttachment,
   followupEphemeral,
   sendMessage,
   toastEphemeral,
   type DiscordActionRow,
+  type DiscordAttachment,
 } from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
 import { openAppoint } from "./stages-appoint.js";
@@ -82,16 +84,22 @@ export async function sendDealBoard(state: GameState): Promise<void> {
  * the admin-uploaded role art (if any) so the embed can carry a
  * thumbnail Discord will render alongside the flavour line.
  */
+export interface DealReveal {
+  embed: {
+    color: number;
+    title: string;
+    description: string;
+    fields: Array<{ name: string; value: string; inline?: boolean }>;
+    image?: { url: string };
+  };
+  /** Role-card attachment, when admin art exists for the viewer's slot. */
+  attachment?: DiscordAttachment;
+}
+
 export async function renderDealReveal(
   state: GameState,
   viewerUserId: string,
-): Promise<{
-  color: number;
-  title: string;
-  description: string;
-  fields: Array<{ name: string; value: string; inline?: boolean }>;
-  thumbnail?: { url: string };
-} | null> {
+): Promise<DealReveal | null> {
   const viewer = playerByUserId(state, viewerUserId);
   if (!viewer) return null;
   const vision = buildVision(state, viewer);
@@ -112,18 +120,15 @@ export async function renderDealReveal(
   // seat-rank among same-role players — 1-indexed, ascending seat
   // order. If the admin uploaded fewer variants than the game has
   // copies of the role, `findVariantArt` returns null for the
-  // un-ranked seats and we omit the thumbnail (no reuse, by design).
-  //
-  // The URL embeds the mtime-derived etag so a re-upload busts
-  // Discord's CDN cache.
+  // un-ranked seats and we omit the image (no reuse, by design).
   let art: { filename: string; etag: string } | null;
   if (isVariantPosition(viewer.position)) {
     const rank = seatRankAmongSameRole(state.players, viewer);
     if (rank === 0) {
       // Should never reach here in practice — vision is built from
       // the same state.players that this lookup walks. If it does,
-      // we get no thumbnail (variant 0 isn't a valid slot). Log so
-      // ops can spot the regression rather than chase a silent
+      // we get no image (variant 0 isn't a valid slot). Log so ops
+      // can spot the regression rather than chase a silent
       // missing-art bug.
       runtime().log.warn("avalon: seat-rank lookup failed for variant role", {
         channelId: state.channelId,
@@ -135,26 +140,25 @@ export async function renderDealReveal(
   } else {
     art = await findArt(viewer.position).catch(() => null);
   }
-  const thumbnail =
-    art != null
-      ? { url: `${runtime().publicBaseUrl()}/art/${art.filename}?v=${art.etag}` }
-      : undefined;
+  // Role card art ships as a real attachment (bot fetches it from
+  // this plugin and uploads to Discord) so it renders regardless of
+  // whether the bot's public URL is Discord-reachable.
+  const card = art != null ? artAttachment(art.filename) : undefined;
   return {
-    color: EMBED_COLOR,
-    title: t(undefined, "stage.deal.title"),
-    description: t(undefined, flavorKey) + "\n\n" + legend,
-    fields: [
-      {
-        name: t(undefined, "stage.deal.vision"),
-        value: visionLines.join("\n"),
-        inline: false,
-      },
-    ],
-    // Use `image` (full-width below the fields) instead of
-    // `thumbnail` (small top-right) so the role card reads as a
-    // proper card face. Falls back to no image when the admin
-    // hasn't uploaded art for this position / variant slot.
-    ...(thumbnail ? { image: thumbnail } : {}),
+    embed: {
+      color: EMBED_COLOR,
+      title: t(undefined, "stage.deal.title"),
+      description: t(undefined, flavorKey) + "\n\n" + legend,
+      fields: [
+        {
+          name: t(undefined, "stage.deal.vision"),
+          value: visionLines.join("\n"),
+          inline: false,
+        },
+      ],
+      ...(card ? { image: card.image } : {}),
+    },
+    ...(card ? { attachment: card.attachment } : {}),
   };
 }
 
@@ -200,8 +204,9 @@ export async function handleDealClick(
   }
   await followupEphemeral({
     interactionToken: ctx.interactionToken,
-    embeds: [reveal],
+    embeds: [reveal.embed],
     components: dealRevealComponents(),
+    ...(reveal.attachment ? { attachments: [reveal.attachment] } : {}),
   });
   return null;
 }

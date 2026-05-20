@@ -177,9 +177,12 @@ export function buildPlugin() {
                   };
                 }
                 return {
-                  embeds: [reveal],
+                  embeds: [reveal.embed],
                   components: dealRevealComponents(),
                   ephemeral: true,
+                  ...(reveal.attachment
+                    ? { attachments: [reveal.attachment] }
+                    : {}),
                 };
               }
               if (sub === "manage") {

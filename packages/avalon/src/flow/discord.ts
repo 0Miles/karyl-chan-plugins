@@ -40,6 +40,41 @@ export interface DiscordActionRow {
 export type Components = DiscordActionRow[];
 
 /**
+ * A file the bot should attach to a message. `path` is a path on
+ * THIS plugin's own HTTP surface (e.g. `/art/merlin.png`); the bot
+ * fetches it over the internal bot↔plugin network and uploads the
+ * bytes to Discord as a real attachment. An embed references the
+ * file via `image: { url: "attachment://<name>" }`.
+ *
+ * This is how role-card / MVP-card images render without the plugin
+ * needing a Discord-reachable public URL — Discord serves the file
+ * from its own CDN once uploaded.
+ */
+export interface DiscordAttachment {
+  /** Attachment filename; must match the `attachment://<name>` ref. */
+  name: string;
+  /** Leading-slash path on the plugin's HTTP surface. */
+  path: string;
+}
+
+/**
+ * Build the `{ image, attachment }` pair for an admin-uploaded art
+ * file (served by web-routes at `/art/<filename>`). The embed sets
+ * `image` to `attachment://<filename>`; the message carries the
+ * matching attachment so the bot can fetch + upload it. Used by the
+ * deal-reveal, ending MVP, and lake embeds.
+ */
+export function artAttachment(filename: string): {
+  image: { url: string };
+  attachment: DiscordAttachment;
+} {
+  return {
+    image: { url: `attachment://${filename}` },
+    attachment: { name: filename, path: `/art/${filename}` },
+  };
+}
+
+/**
  * Send a new message to a channel. Returns the message id on success,
  * or null on failure (RPC blip, missing permission). Caller should
  * treat null as "give up gracefully" — it's the SDK contract.
@@ -49,6 +84,7 @@ export async function sendMessage(opts: {
   content?: string;
   embeds?: DiscordEmbed[];
   components?: Components;
+  attachments?: DiscordAttachment[];
 }): Promise<{ id: string; channelId: string } | null> {
   const res = (await runtime().botRpc("/api/plugin/messages.send", {
     channel_id: opts.channelId,
@@ -56,6 +92,9 @@ export async function sendMessage(opts: {
     embeds: opts.embeds,
     components: opts.components,
     allowed_mentions: { parse: [] },
+    ...(opts.attachments && opts.attachments.length > 0
+      ? { attachments: opts.attachments }
+      : {}),
   })) as { id?: string; channel_id?: string } | null;
   if (!res || !res.id || !res.channel_id) return null;
   return { id: res.id, channelId: res.channel_id };
@@ -122,6 +161,7 @@ export async function followupEphemeral(opts: {
   content?: string;
   embeds?: DiscordEmbed[];
   components?: Components;
+  attachments?: DiscordAttachment[];
 }): Promise<{ id: string | null } | null> {
   const res = (await runtime().botRpc(
     "/api/plugin/interactions.followup",
@@ -131,6 +171,9 @@ export async function followupEphemeral(opts: {
       embeds: opts.embeds,
       components: opts.components,
       ephemeral: true,
+      ...(opts.attachments && opts.attachments.length > 0
+        ? { attachments: opts.attachments }
+        : {}),
     },
   )) as { ok?: boolean; id?: string | null } | null;
   if (res === null) return null;
