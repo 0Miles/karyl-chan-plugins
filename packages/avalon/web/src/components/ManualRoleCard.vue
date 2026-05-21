@@ -6,6 +6,8 @@ const props = defineProps<{ role: ManualData["roles"][number] }>();
 
 /** Which card face is shown — only meaningful for variant roles. */
 const face = ref(0);
+/** Last flip direction — drives the slide-transition name. */
+const dir = ref<"next" | "prev">("next");
 
 /** Discord copy carries **bold** markers — drop them for plain text. */
 function plain(s: string): string {
@@ -14,57 +16,102 @@ function plain(s: string): string {
 
 function flip(step: number): void {
   const n = props.role.images.length;
-  if (n > 1) face.value = (face.value + step + n) % n;
+  if (n <= 1) return;
+  dir.value = step > 0 ? "next" : "prev";
+  face.value = (face.value + step + n) % n;
 }
 </script>
 
 <template>
-  <article class="role-card" :class="`fac-${role.faction}`">
-    <div class="art" :class="{ multi: role.images.length > 1 }">
-      <!-- Stacked card backs hint at the multiple faces. -->
-      <span v-if="role.images.length > 1" class="back back2" />
-      <span v-if="role.images.length > 1" class="back back1" />
-      <div class="frame">
-        <img
-          v-if="role.images.length"
-          :src="role.images[face]"
-          :alt="role.name"
-        />
-        <div v-else class="art-empty">尚未設定角色圖</div>
-      </div>
+  <div class="stack" :class="{ multi: role.images.length > 1 }">
+    <!-- Whole-card backs hint at the stacked variant faces. -->
+    <span v-if="role.images.length > 1" class="ghost g2" aria-hidden="true" />
+    <span v-if="role.images.length > 1" class="ghost g1" aria-hidden="true" />
 
-      <template v-if="role.images.length > 1">
-        <button
-          class="nav prev"
-          type="button"
-          aria-label="上一張卡面"
-          @click="flip(-1)"
+    <!-- Clip box for the sliding card faces. -->
+    <div class="viewport">
+      <Transition :name="`slide-${dir}`">
+        <article
+          :key="face"
+          class="role-card"
+          :class="`fac-${role.faction}`"
         >
-          ‹
-        </button>
-        <button
-          class="nav next"
-          type="button"
-          aria-label="下一張卡面"
-          @click="flip(1)"
-        >
-          ›
-        </button>
-        <span class="count">{{ face + 1 }} / {{ role.images.length }}</span>
-      </template>
+          <div class="art">
+            <img
+              v-if="role.images.length"
+              :src="role.images[face]"
+              :alt="role.name"
+            />
+            <div v-else class="art-empty">尚未設定角色圖</div>
+          </div>
+          <p class="name">{{ role.name }}</p>
+          <p class="short">{{ plain(role.short) }}</p>
+          <details class="detail">
+            <summary>詳細說明</summary>
+            <p class="detail-body">{{ plain(role.detail) }}</p>
+          </details>
+        </article>
+      </Transition>
     </div>
 
-    <p class="name">{{ role.name }}</p>
-    <p class="short">{{ plain(role.short) }}</p>
-
-    <details class="detail">
-      <summary>詳細說明</summary>
-      <p class="detail-body">{{ plain(role.detail) }}</p>
-    </details>
-  </article>
+    <!-- Side flip controls — revealed on hover. -->
+    <template v-if="role.images.length > 1">
+      <button
+        class="nav prev"
+        type="button"
+        aria-label="上一張卡面"
+        @click="flip(-1)"
+      >
+        ‹
+      </button>
+      <button
+        class="nav next"
+        type="button"
+        aria-label="下一張卡面"
+        @click="flip(1)"
+      >
+        ›
+      </button>
+    </template>
+  </div>
 </template>
 
 <style scoped>
+.stack {
+  position: relative;
+  align-self: start;
+}
+
+/* ── stacked card backs (whole-card, not just the art) ──────────── */
+.ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+.g1 {
+  transform: translate(6px, 6px);
+}
+.g2 {
+  transform: translate(12px, 12px);
+}
+/* Leave the stacked backs room inside the grid cell. */
+.stack.multi {
+  margin-right: 12px;
+  margin-bottom: 12px;
+}
+
+.viewport {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+
 .role-card {
   display: flex;
   flex-direction: column;
@@ -77,7 +124,7 @@ function flip(step: number): void {
   box-shadow: var(--shadow-sm);
   /* Tall narrow card — uniform height before any detail expands. */
   min-height: 480px;
-  align-self: start;
+  width: 100%;
 }
 .fac-arthur {
   border-top-color: var(--faction-arthur);
@@ -88,21 +135,14 @@ function flip(step: number): void {
 
 .art {
   position: relative;
-  /* Square — width is driven by the card column. */
   aspect-ratio: 1;
   margin-bottom: 0.7rem;
-}
-/* Front card face. */
-.frame {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg-surface-2);
 }
-.frame img {
+.art img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -116,67 +156,6 @@ function flip(step: number): void {
   justify-content: center;
   font-size: 0.8rem;
   color: var(--text-faint);
-}
-/* Offset "card back" layers — only when there are multiple faces. */
-.back {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-surface-2);
-}
-.back1 {
-  z-index: 1;
-  transform: translate(6px, 6px);
-}
-.back2 {
-  z-index: 0;
-  transform: translate(12px, 12px);
-}
-.art.multi {
-  /* Leave room for the offset stack on the bottom-right. */
-  margin-right: 12px;
-  margin-bottom: 1rem;
-}
-
-.nav {
-  position: absolute;
-  top: 50%;
-  z-index: 3;
-  width: 26px;
-  height: 26px;
-  transform: translateY(-50%);
-  border: none;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-  font-size: 1rem;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.nav:hover {
-  background: rgba(0, 0, 0, 0.7);
-}
-.nav.prev {
-  left: 6px;
-}
-.nav.next {
-  right: 6px;
-}
-.count {
-  position: absolute;
-  z-index: 3;
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.68rem;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.5);
-  border-radius: 999px;
-  padding: 0.05rem 0.45rem;
 }
 
 .name {
@@ -197,7 +176,6 @@ function flip(step: number): void {
   cursor: pointer;
   font-size: 0.82rem;
   font-weight: 600;
-  /* Normal title colour — not the brand accent. */
   color: var(--text);
   user-select: none;
 }
@@ -207,5 +185,71 @@ function flip(step: number): void {
   line-height: 1.7;
   color: var(--text);
   white-space: pre-wrap;
+}
+
+/* ── side flip controls ─────────────────────────────────────────── */
+.nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  transform: translateY(-50%);
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Hidden until the card is hovered / focused. */
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.nav:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+.nav.prev {
+  left: 5px;
+}
+.nav.next {
+  right: 5px;
+}
+.stack:hover .nav,
+.nav:focus-visible {
+  opacity: 1;
+}
+
+/* ── slide transition on face switch ────────────────────────────── */
+.slide-next-enter-active,
+.slide-next-leave-active,
+.slide-prev-enter-active,
+.slide-prev-leave-active {
+  transition: transform 0.28s ease, opacity 0.28s ease;
+}
+/* The leaving face is taken out of flow so the new one fills the slot. */
+.slide-next-leave-active,
+.slide-prev-leave-active {
+  position: absolute;
+  inset: 0;
+}
+.slide-next-enter-from {
+  transform: translateX(100%);
+  opacity: 0;
+}
+.slide-next-leave-to {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+.slide-prev-enter-from {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+.slide-prev-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
 }
 </style>
