@@ -160,6 +160,7 @@ export const zhTW = {
   "stage.lake.content":
     "由 {holder} 使用第 {n} 次湖中女神，請選擇要查驗的對象。",
   "stage.lake.checked": "{holder} 用湖中女神查驗了 {target}。",
+  "stage.lake.resultTitle": "查驗結果",
   "stage.lake.result": "{target} 的陣營：**{faction}**",
   "stage.lake.fieldHolder": "目前持有",
 

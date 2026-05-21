@@ -151,13 +151,15 @@ export async function handleLakeClick(
       withThumbnail(
         {
           color: EMBED_COLOR,
-          title: t(undefined, "stage.lake.title"),
+          title: t(undefined, "stage.lake.resultTitle"),
           description: t(undefined, "stage.lake.result", {
             target: `**${target.displayName}**`,
+            // Prefix the faction with its board emoji (🔵 藍方 /
+            // 🔴 紅方) so the result reads at a glance.
             faction:
               faction === "arthur"
-                ? t(undefined, "faction.arthur")
-                : t(undefined, "faction.mordred"),
+                ? `🔵 ${t(undefined, "faction.arthur")}`
+                : `🔴 ${t(undefined, "faction.mordred")}`,
           }),
         },
         lakeArt,
