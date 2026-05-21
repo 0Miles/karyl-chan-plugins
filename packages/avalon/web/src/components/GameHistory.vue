@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GameEvent, PlayerView } from "../game-types";
-import { describeEvent } from "../game-labels";
+import { describeEvent, markerColor } from "../game-labels";
 
 const props = defineProps<{
   events: GameEvent[];
@@ -67,7 +67,12 @@ function clockOf(ms: number): string {
           <p v-if="group.label" class="group-label">{{ group.label }}</p>
           <ul class="players">
             <li v-for="ref in group.players" :key="ref.seat" class="player">
-              <span class="avatar">
+              <span
+                class="avatar"
+                :style="
+                  ref.player ? { borderColor: markerColor(ref.player) } : {}
+                "
+              >
                 <img
                   v-if="ref.player?.avatarUrl"
                   :src="ref.player.avatarUrl"
@@ -158,8 +163,8 @@ function clockOf(ms: number): string {
   gap: 0.42rem;
 }
 .avatar {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
@@ -167,7 +172,8 @@ function clockOf(ms: number): string {
   align-items: center;
   justify-content: center;
   background: var(--bg-surface);
-  border: 1px solid var(--border);
+  /* Ring colour is the viewer's vision marker for this seat. */
+  border: 2px solid var(--text-faint);
 }
 .avatar img {
   width: 100%;

@@ -5,6 +5,7 @@
 import type {
   Faction,
   GameEvent,
+  PlayerView,
   RolePosition,
   VisionMarker,
 } from "./game-types";
@@ -43,6 +44,24 @@ export const MARKER_LABEL: Record<VisionMarker, string> = {
   purple: "梅林或莫甘娜",
   unknown: "未知",
 };
+
+/** CSS colour per vision marker — the board's faction palette. */
+export const MARKER_COLOR: Record<VisionMarker, string> = {
+  self: "var(--accent)",
+  red: "var(--faction-mordred)",
+  blue: "var(--faction-arthur)",
+  purple: "#8b5cf6",
+  unknown: "var(--text-faint)",
+};
+
+/**
+ * Colour for a player's vision marker. Shared by the player list and
+ * the history items so a seat's faction reads consistently across
+ * the board.
+ */
+export function markerColor(player: PlayerView): string {
+  return MARKER_COLOR[player.marker];
+}
 
 export const STAGE_LABEL: Record<string, string> = {
   lobby: "準備中",

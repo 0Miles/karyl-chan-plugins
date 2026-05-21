@@ -1,21 +1,17 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { PlayerView, VisionMarker } from "../game-types";
-import { MARKER_LABEL, ROLE_NAME, FACTION_NAME } from "../game-labels";
+import type { PlayerView } from "../game-types";
+import {
+  FACTION_NAME,
+  MARKER_LABEL,
+  ROLE_NAME,
+  markerColor,
+} from "../game-labels";
 
 const props = defineProps<{
   players: PlayerView[];
   viewerSeat: number | null;
 }>();
-
-/** Marker → CSS custom property for the dot / accent colour. */
-const MARKER_COLOR: Record<VisionMarker, string> = {
-  self: "var(--accent)",
-  red: "var(--faction-mordred)",
-  blue: "var(--faction-arthur)",
-  purple: "#9b59b6",
-  unknown: "var(--text-faint)",
-};
 
 const ordered = computed(() =>
   [...props.players].sort((a, b) => a.seat - b.seat),
@@ -37,7 +33,7 @@ function initials(name: string): string {
         'player--mission': p.onMission,
       }"
     >
-      <div class="avatar" :style="{ borderColor: MARKER_COLOR[p.marker] }">
+      <div class="avatar" :style="{ borderColor: markerColor(p) }">
         <img v-if="p.avatarUrl" :src="p.avatarUrl" :alt="p.displayName" />
         <span v-else class="avatar-fallback">
           {{ p.isNpc ? "🤖" : initials(p.displayName) }}
@@ -66,14 +62,14 @@ function initials(name: string): string {
           v-if="p.role"
           class="role-chip"
           :style="{
-            background: MARKER_COLOR[p.marker],
+            background: markerColor(p),
           }"
           :title="FACTION_NAME[p.faction ?? 'arthur']"
         >
           {{ ROLE_NAME[p.role] }}
         </span>
         <span v-else class="marker">
-          <span class="dot" :style="{ background: MARKER_COLOR[p.marker] }" />
+          <span class="dot" :style="{ background: markerColor(p) }" />
           {{ MARKER_LABEL[p.marker] }}
         </span>
       </div>
