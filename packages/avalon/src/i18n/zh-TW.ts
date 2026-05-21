@@ -33,6 +33,17 @@ export const zhTW = {
   "stage.board.viewCard": "🪪 查看角色卡",
   "command.avalon.stop.description": "強制終止此頻道進行中的對局",
   "command.avalon.manage.description": "取得阿瓦隆管理 WebUI 的一次性連結",
+  "command.avalon.webui.description":
+    "取得此頻道對局的專屬遊戲板連結（含你的角色卡與視野）",
+  "webui.title": "阿瓦隆遊戲板",
+  "webui.descriptionPlayer":
+    "你的專屬遊戲板：即時對局狀態、你的角色卡與視野標記、玩家列表與歷史。連結僅限你本人。",
+  "webui.descriptionSpectator":
+    "旁觀者遊戲板：可看玩家列表、任務進度與歷史；不會顯示任何角色或視野資訊。",
+  "webui.openButton": "開啟遊戲板",
+  "webui.botRejected":
+    "Bot 拒絕了登入請求 — 可能 `auth.session` RPC scope 尚未核可。",
+  "webui.notAllowed": "Bot 未核發遊戲板連結，請稍後再試。",
   "manage.title": "阿瓦隆管理面板",
   "manage.description":
     "查看進行中對局與報名，必要時可強制終止。15 分鐘內開啟連結；瀏覽頁籤之後會自動續約最多 1 天。",

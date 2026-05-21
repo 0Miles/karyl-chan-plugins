@@ -21,7 +21,13 @@ import {
 } from "./flow/stages.js";
 import { deleteMessage, sendMessage } from "./flow/discord.js";
 import { playerByUserId } from "./game/state.js";
-import { getGame, removeGame, withChannelLock } from "./game/store.js";
+import {
+  getEndedGame,
+  getGame,
+  removeGame,
+  withChannelLock,
+} from "./game/store.js";
+import { notifyGameChanged } from "./flow/sse.js";
 import { cleanupOrphanArt } from "./art.js";
 import { clearNpcTimer } from "./npc/driver.js";
 import {
@@ -73,8 +79,12 @@ export function buildPlugin() {
       "messages.delete",
       "interactions.respond",
       "interactions.followup",
-      // The admin WebUI requires this to mint plugin-session JWTs.
+      // The admin + game-board WebUIs need this to mint
+      // plugin-session JWTs.
       "auth.session",
+      // The game board resolves guild nicknames + avatars for its
+      // player list via members.get.
+      "members.get",
     ],
     guildFeatures: [
       defineGuildFeature({
@@ -185,6 +195,11 @@ export function buildPlugin() {
                 name: "manage",
                 description: t(undefined, "command.avalon.manage.description"),
               },
+              {
+                type: "sub_command",
+                name: "webui",
+                description: t(undefined, "command.avalon.webui.description"),
+              },
             ],
             handler: async (ctx: CommandContext): Promise<CommandReply> => {
               const guildId = ctx.guildId;
@@ -209,6 +224,8 @@ export function buildPlugin() {
                   await clearCurrentStageButtons(existing);
                   clearNpcTimer(channelId);
                   removeGame(channelId);
+                  // Tell any open game boards the session is gone.
+                  notifyGameChanged(channelId);
                   return t(undefined, "error.stopped");
                 });
               }
@@ -351,6 +368,60 @@ export function buildPlugin() {
                     linkButtonRow(
                       `🔧 ${t(undefined, "manage.openButton")}`,
                       `${effectiveBase()}/?token=${res.token}`,
+                    ),
+                  ],
+                  ephemeral: true,
+                };
+              }
+              if (sub === "webui") {
+                // Per-player game board. Works for seated players
+                // (own role card + vision) and spectators alike —
+                // the per-viewer snapshot decides what each sees.
+                // Available while a game is live AND for a short
+                // window after it ends (retained ended game).
+                const game =
+                  getGame(channelId) ?? getEndedGame(channelId);
+                if (!game) {
+                  return {
+                    content: t(undefined, "error.notRunning"),
+                    ephemeral: true,
+                  };
+                }
+                // `session` JWT: carries userId + guildId, no caps —
+                // authorized purely by the embedded guild. Default
+                // 6 h TTL comfortably outlasts a game.
+                const res = (await ctx.botRpc("/api/plugin/auth.session", {
+                  user_id: ctx.userId,
+                  kind: "session",
+                  guild_id: guildId,
+                })) as { allowed?: boolean; token?: string } | null;
+                if (res === null) {
+                  return {
+                    content: `⚠ ${t(undefined, "webui.botRejected")}`,
+                    ephemeral: true,
+                  };
+                }
+                if (
+                  res.allowed !== true ||
+                  typeof res.token !== "string"
+                ) {
+                  return {
+                    content: `⚠ ${t(undefined, "webui.notAllowed")}`,
+                    ephemeral: true,
+                  };
+                }
+                const isPlayer = playerByUserId(game, ctx.userId) !== null;
+                const intro = isPlayer
+                  ? t(undefined, "webui.descriptionPlayer")
+                  : t(undefined, "webui.descriptionSpectator");
+                return {
+                  content: `🎲 **${t(undefined, "webui.title")}**\n${intro}`,
+                  components: [
+                    linkButtonRow(
+                      `🎲 ${t(undefined, "webui.openButton")}`,
+                      // `c` pins the board to this channel's game;
+                      // the token's guildId scopes cross-guild access.
+                      `${effectiveBase()}/?token=${res.token}&c=${channelId}`,
                     ),
                   ],
                   ephemeral: true,

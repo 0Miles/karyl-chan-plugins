@@ -25,6 +25,7 @@ import {
   type RoleToggles,
 } from "../game/roles.js";
 import { editMessage, sendMessage } from "./discord.js";
+import { enrichPlayerProfiles } from "./profiles.js";
 import { renderDealReveal, sendDealBoard } from "./stages.js";
 import { sampleNpcDisplayNames } from "../npc/names.js";
 
@@ -322,6 +323,10 @@ async function handleStartClick(
   deal(game);
   setGame(signup.channelId, game);
   signups.delete(signup.channelId);
+  // Resolve guild nicknames + avatars before the first board is
+  // drawn so every embed (and the WebUI) shows the names/faces the
+  // guild sees. Best-effort — falls back to sign-up names on failure.
+  await enrichPlayerProfiles(game);
   // Re-paint the sign-up message into a "dealing" snapshot so the
   // channel scrollback has a record, then post the reveal board.
   await editMessage({
