@@ -29,6 +29,53 @@ export function listGames(): GameState[] {
 }
 
 /**
+ * Ended-game retention. `endGame` moves a finished GameState here
+ * (out of the active `games` map, so a fresh `/avalon start` in the
+ * same channel is unblocked) and keeps it readable for a short
+ * window — long enough for players to open `/avalon webui` after the
+ * game ends and review the full role reveal + verdict.
+ *
+ * Force-stops (`/avalon stop`, the admin force-stop route) use
+ * `removeGame` and intentionally do NOT retain — a stopped game has
+ * no result worth keeping.
+ */
+const ENDED_GAME_TTL_MS = 10 * 60_000;
+const endedGames = new Map<
+  string,
+  { state: GameState; expiresAt: number }
+>();
+
+/** Move a finished game out of the active map into timed retention. */
+export function retainEndedGame(state: GameState): void {
+  const channelId = state.channelId;
+  games.delete(channelId);
+  endedGames.set(channelId, {
+    state,
+    expiresAt: Date.now() + ENDED_GAME_TTL_MS,
+  });
+  const handle = setTimeout(() => {
+    const entry = endedGames.get(channelId);
+    // Guard against evicting a *newer* ended game that replaced this
+    // one in the same channel within the TTL window.
+    if (entry && entry.state.sessionId === state.sessionId) {
+      endedGames.delete(channelId);
+    }
+  }, ENDED_GAME_TTL_MS);
+  if (typeof handle.unref === "function") handle.unref();
+}
+
+/** Read a retained ended game, or null once it has expired. */
+export function getEndedGame(channelId: string): GameState | null {
+  const entry = endedGames.get(channelId);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    endedGames.delete(channelId);
+    return null;
+  }
+  return entry.state;
+}
+
+/**
  * Per-channel promise-chain lock. Slash commands, button handlers, and
  * the WebUI all mutate the same `GameState`; mutations must serialise
  * per channel so e.g. two players clicking "join" in the same

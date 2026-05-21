@@ -8,7 +8,7 @@ import {
 } from "../game/state.js";
 import { ROLES } from "../game/roles.js";
 import { recordEvent } from "../game/events.js";
-import { removeGame } from "../game/store.js";
+import { retainEndedGame } from "../game/store.js";
 import { findArt, findVariantArt, isVariantPosition } from "../art.js";
 import {
   artAttachment,
@@ -27,8 +27,9 @@ import { clearNpcTimer } from "../npc/driver.js";
  * field; the card itself is the hint, leaving the read as a
  * conversation prompt rather than an announcement.
  *
- * After posting, clears the in-memory state so a fresh
- * `/avalon start` can run in this channel.
+ * After posting, moves the state into timed retention (out of the
+ * active map, so a fresh `/avalon start` can run in this channel)
+ * so `/avalon webui` can still show the finished game for a while.
  */
 export async function endGame(state: GameState, verdict: Verdict): Promise<void> {
   state.stage = "ended";
@@ -77,11 +78,12 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
     embeds: [embed],
     ...(mvpCard ? { attachments: [mvpCard.attachment] } : {}),
   });
-  // The session is over; future `/avalon start` re-creates fresh
-  // state. We keep the per-channel sign-up map separate (see
-  // signup.ts) so its lifecycle isn't entangled.
+  // The session is over. Retention drops it from the active map
+  // (future `/avalon start` re-creates fresh state) but keeps it
+  // readable by the WebUI for a short window. The per-channel
+  // sign-up map is separate (see signup.ts) so it isn't entangled.
   clearNpcTimer(state.channelId);
-  removeGame(state.channelId);
+  retainEndedGame(state);
 }
 
 function factionMarker(p: Player): string {
