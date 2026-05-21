@@ -135,7 +135,7 @@ export const zhTW = {
   "stage.privateVote.openVote": "前往投票",
   "stage.privateVote.ephemeralPrompt": "請投出你的票",
   "stage.privateVote.success": "✅ 成功",
-  "stage.privateVote.fail": "❎ 失敗",
+  "stage.privateVote.fail": "❌ 失敗",
   "stage.privateVote.need2Fail": "本輪 7 人以上需要兩張失敗票才會失敗。",
   "stage.privateVote.fieldVotes": "投票狀況",
   "stage.privateVote.fieldRoster": "任務名單",

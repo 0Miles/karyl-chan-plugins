@@ -37,7 +37,7 @@ import { scheduleNpcStep } from "../npc/driver.js";
  * message, so we use a two-step ephemeral handshake:
  *
  *   1. The public mission roster carries a single [前往投票] button.
- *   2. A mission member clicks it → ephemeral with [✅ 成功] [❎ 失敗].
+ *   2. A mission member clicks it → ephemeral with [✅ 成功] [❌ 失敗].
  *   3. Their button click on the ephemeral records their vote and
  *      sends back an ephemeral confirmation. The public message
  *      repaints to show only the running "n / N voted" count.
@@ -140,7 +140,7 @@ async function handlePrivateBallot(
   if (game.current.votes[ctx.userId]) return null;
   // Defence in depth — the success button is disabled for evil only
   // *visually*; reject a fail vote from a non-evil player at the
-  // engine boundary too (silently — the ❎ button is already
+  // engine boundary too (silently — the ❌ button is already
   // disabled for them so this shouldn't be reachable).
   if (ballot === "fail" && factionOf(me) === "arthur") return null;
   game.current.votes[ctx.userId] = ballot;
