@@ -26,6 +26,13 @@ export interface Player {
   userId: string;
   /** Display name captured at sign-up time so we don't re-fetch. */
   displayName: string;
+  /**
+   * Guild avatar URL — resolved once at deal time via the bot's
+   * `members.get` RPC (see `flow/profiles.ts`). null for NPC seats
+   * and for humans whose lookup failed; the WebUI falls back to a
+   * generated placeholder.
+   */
+  avatarUrl: string | null;
   /** Seat number 1..N — stable after `deal()` shuffles. */
   index: number;
   position: Position;
@@ -177,6 +184,7 @@ export function newGameState(opts: {
   const players: Player[] = opts.signups.map((s, i) => ({
     userId: s.userId,
     displayName: s.displayName,
+    avatarUrl: null,
     index: i,
     position: "loyal",
     lakeTarget: null,

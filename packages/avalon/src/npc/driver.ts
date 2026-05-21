@@ -44,6 +44,7 @@ import { t } from "../i18n/index.js";
 import { EMBED_COLOR } from "../constants.js";
 import { editMessage } from "../flow/discord.js";
 import { runtime } from "../flow/runtime.js";
+import { notifyGameChanged } from "../flow/sse.js";
 import {
   decideAppoint,
   decidePublicVote,
@@ -220,8 +221,9 @@ async function runStep(
         channelId,
         err: String(err),
       });
-      return;
     }
+    // Push the post-NPC-action state to any WebUI boards watching.
+    notifyGameChanged(channelId);
   });
   // After the lock is released, re-read state and queue the next NPC
   // tick. Done outside the lock so consecutive NPC turns don't block

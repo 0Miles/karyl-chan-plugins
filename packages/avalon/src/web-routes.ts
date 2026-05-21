@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fastifyMultipart from "@fastify/multipart";
 import { createReadStream, readFileSync } from "fs";
 import { stat } from "fs/promises";
+import { randomBytes } from "crypto";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import {
@@ -15,7 +16,14 @@ import {
   type ManageClaims,
 } from "./manage-tokens.js";
 import { PLUGIN_KEY } from "./constants.js";
-import { getGame, listGames, removeGame } from "./game/store.js";
+import {
+  getEndedGame,
+  getGame,
+  listGames,
+  removeGame,
+} from "./game/store.js";
+import { buildSnapshot } from "./game/snapshot.js";
+import { notifyGameChanged, subscribe } from "./flow/sse.js";
 import { listSignups, removeSignup } from "./flow/signup.js";
 import { clearCurrentStageButtons } from "./flow/stop.js";
 import {
@@ -137,6 +145,55 @@ function authManageAccess(
     return null;
   }
   return claims;
+}
+
+// ── SSE tickets ───────────────────────────────────────────────────────
+// EventSource can't send an Authorization header, so the game-board
+// stream is authorized by a short-lived ticket carried in the query
+// string instead of the 6-hour session JWT. The SPA calls
+// POST /api/game/sse-ticket (Bearer session token) to mint one right
+// before opening the EventSource. The 60 s TTL bounds how long a
+// ticket sitting in a URL / proxy log stays usable; the SPA re-mints
+// on reconnect.
+
+const SSE_TICKET_TTL_MS = 60_000;
+
+interface SseTicket {
+  userId: string;
+  guildId: string | null;
+  expiresAt: number;
+}
+
+const sseTickets = new Map<string, SseTicket>();
+
+function mintSseTicket(userId: string, guildId: string | null): string {
+  const now = Date.now();
+  // Opportunistic sweep — the map never grows past live tickets.
+  for (const [key, t] of sseTickets) {
+    if (t.expiresAt <= now) sseTickets.delete(key);
+  }
+  const ticket = randomBytes(18).toString("base64url");
+  sseTickets.set(ticket, {
+    userId,
+    guildId,
+    expiresAt: now + SSE_TICKET_TTL_MS,
+  });
+  return ticket;
+}
+
+/**
+ * Validate a ticket. Not single-use: EventSource's native reconnect
+ * reuses the same URL, so the ticket must survive a few reconnects
+ * within its short TTL window.
+ */
+function checkSseTicket(ticket: string): SseTicket | null {
+  const t = sseTickets.get(ticket);
+  if (!t) return null;
+  if (t.expiresAt <= Date.now()) {
+    sseTickets.delete(ticket);
+    return null;
+  }
+  return t;
 }
 
 // ── Public snapshot shape ─────────────────────────────────────────────
@@ -273,7 +330,124 @@ export async function registerWebRoutes(
       if (!removed) {
         return reply.code(404).send({ error: "No game or sign-up here" });
       }
+      // Tell any open game boards the session is gone.
+      notifyGameChanged(channelId);
       return { ok: true, channelId };
+    },
+  );
+
+  // ── WebUI game board (players + spectators) ───────────────────────
+  // Authorized by the per-user `plugin-session` JWT minted by
+  // `/avalon webui`. The session token carries the user's id + guild;
+  // the per-viewer snapshot (game/snapshot.ts) is the security
+  // boundary that decides what role/vision data each viewer may see.
+
+  /**
+   * Resolve the game in `channelId` and confirm it belongs to the
+   * token's guild. Returns null after sending the error reply.
+   */
+  function gameForViewer(
+    channelId: string,
+    guildId: string | null,
+    reply: FastifyReply,
+  ): ReturnType<typeof getGame> {
+    const game = getGame(channelId) ?? getEndedGame(channelId);
+    if (!game) {
+      reply.code(404).send({ error: "No game in this channel" });
+      return null;
+    }
+    // The session token is guild-scoped; never let it read a game in
+    // another guild even if the caller guesses a channelId.
+    if (!guildId || game.guildId !== guildId) {
+      reply.code(403).send({ error: "Game belongs to another guild" });
+      return null;
+    }
+    return game;
+  }
+
+  // Per-viewer snapshot — initial paint + the polling fallback the
+  // SPA uses when SSE can't get through a buffering proxy.
+  server.get<{ Querystring: { channel?: string } }>(
+    "/api/game/state",
+    async (request, reply) => {
+      const claims = auth(request, reply);
+      if (!claims) return;
+      const channelId = request.query.channel;
+      if (typeof channelId !== "string" || channelId.length === 0) {
+        return reply.code(400).send({ error: "channel query param required" });
+      }
+      const game = gameForViewer(channelId, claims.guildId, reply);
+      if (!game) return;
+      return buildSnapshot(game, claims.userId);
+    },
+  );
+
+  // Mint a short-lived ticket for the EventSource connection below.
+  server.post("/api/game/sse-ticket", async (request, reply) => {
+    const claims = auth(request, reply);
+    if (!claims) return;
+    return { ticket: mintSseTicket(claims.userId, claims.guildId) };
+  });
+
+  // SSE stream — live per-viewer snapshots. Ticket-authorized (the
+  // browser EventSource API can't set an Authorization header).
+  server.get<{ Querystring: { channel?: string; ticket?: string } }>(
+    "/api/game/events",
+    (request, reply) => {
+      const channelId = request.query.channel;
+      const ticketStr = request.query.ticket;
+      if (
+        typeof channelId !== "string" ||
+        channelId.length === 0 ||
+        typeof ticketStr !== "string" ||
+        ticketStr.length === 0
+      ) {
+        reply.code(400).send({ error: "channel and ticket required" });
+        return;
+      }
+      const ticket = checkSseTicket(ticketStr);
+      if (!ticket) {
+        reply.code(401).send({ error: "Invalid or expired ticket" });
+        return;
+      }
+      const game = getGame(channelId) ?? getEndedGame(channelId);
+      if (game && (!ticket.guildId || game.guildId !== ticket.guildId)) {
+        reply.code(403).send({ error: "Game belongs to another guild" });
+        return;
+      }
+
+      // Hand the socket off — we own the raw response until close.
+      reply.hijack();
+      const raw = reply.raw;
+      raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        // Defeat proxy/runtime response buffering so frames flush.
+        "X-Accel-Buffering": "no",
+      });
+      const send = (payload: unknown): void => {
+        raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+      // Tell EventSource to wait 3 s before a native reconnect.
+      raw.write("retry: 3000\n\n");
+      // Initial paint.
+      send(game ? buildSnapshot(game, ticket.userId) : { gone: true });
+      const unsubscribe = subscribe(channelId, {
+        userId: ticket.userId,
+        send,
+      });
+      // Comment-only heartbeat keeps idle proxies from dropping us.
+      const heartbeat = setInterval(() => {
+        raw.write(": hb\n\n");
+      }, 25_000);
+      if (typeof heartbeat.unref === "function") heartbeat.unref();
+      const cleanup = (): void => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      };
+      request.raw.on("close", cleanup);
+      request.raw.on("error", cleanup);
     },
   );
 

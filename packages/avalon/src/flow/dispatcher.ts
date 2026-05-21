@@ -14,6 +14,7 @@ import {
   handleLakeClick,
   handleAssassinateClick,
 } from "./stages.js";
+import { notifyGameChanged } from "./sse.js";
 
 export { wireRuntime } from "./runtime.js";
 
@@ -40,28 +41,12 @@ export async function onComponent(
   const channelId = ctx.channelId;
   try {
     return await withChannelLock(channelId, async () => {
-      switch (componentId) {
-        case "sig":
-          return handleSignupClick(ctx, ctx.tail as SignupAction);
-        case "deal":
-          return handleDealClick(ctx, ctx.tail);
-        case "appt":
-          return handleAppointClick(ctx, ctx.tail);
-        case "pub":
-          return handlePublicVoteClick(ctx, ctx.tail);
-        case "priv":
-          return handlePrivateVoteClick(ctx, ctx.tail);
-        case "lake":
-          return handleLakeClick(ctx, ctx.tail);
-        case "asn":
-          return handleAssassinateClick(ctx, ctx.tail);
-        default:
-          runtime().log.warn("avalon: unknown component", {
-            componentId,
-            customId: ctx.customId,
-          });
-          return null;
-      }
+      const reply = await dispatchComponent(ctx, componentId);
+      // Any click may have advanced the game — push the new state to
+      // every WebUI board watching this channel. Still inside the
+      // lock, so the snapshot reflects the just-applied mutation.
+      notifyGameChanged(channelId);
+      return reply;
     });
   } catch (err) {
     runtime().log.error("avalon: component handler threw", {
@@ -73,6 +58,35 @@ export async function onComponent(
       err instanceof Error ? err.message : String(err),
     );
     return null;
+  }
+}
+
+/** Route a button click to its per-stage handler. */
+function dispatchComponent(
+  ctx: ComponentContext,
+  componentId: string,
+): Promise<ComponentReply> {
+  switch (componentId) {
+    case "sig":
+      return handleSignupClick(ctx, ctx.tail as SignupAction);
+    case "deal":
+      return handleDealClick(ctx, ctx.tail);
+    case "appt":
+      return handleAppointClick(ctx, ctx.tail);
+    case "pub":
+      return handlePublicVoteClick(ctx, ctx.tail);
+    case "priv":
+      return handlePrivateVoteClick(ctx, ctx.tail);
+    case "lake":
+      return handleLakeClick(ctx, ctx.tail);
+    case "asn":
+      return handleAssassinateClick(ctx, ctx.tail);
+    default:
+      runtime().log.warn("avalon: unknown component", {
+        componentId,
+        customId: ctx.customId,
+      });
+      return Promise.resolve(null);
   }
 }
 
