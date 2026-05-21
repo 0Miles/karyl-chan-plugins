@@ -790,6 +790,12 @@ export async function registerWebRoutes(
       : null;
     return {
       intro: t(undefined, "manual.intro"),
+      commands: (
+        ["start", "stop", "card", "status", "manage", "webui", "manual"] as const
+      ).map((sub) => ({
+        name: `/avalon ${sub}`,
+        description: t(undefined, `command.avalon.${sub}.description`),
+      })),
       rules: (["goal", "flow", "win", "lake"] as const).map((key) => ({
         title: t(undefined, `manual.rule.${key}.title`),
         body: t(undefined, `manual.rule.${key}.body`),

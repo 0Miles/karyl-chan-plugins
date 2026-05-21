@@ -117,6 +117,7 @@ export interface GoneSnapshot {
 /** Payload of the public GET /api/manual endpoint. */
 export interface ManualData {
   intro: string;
+  commands: Array<{ name: string; description: string }>;
   rules: Array<{
     title: string;
     body: string;

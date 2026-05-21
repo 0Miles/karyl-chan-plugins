@@ -40,14 +40,28 @@ function plain(s: string): string {
       >
         <p class="section-title">{{ rule.title }}</p>
         <div class="rule-content" :class="{ 'has-image': rule.image }">
-          <p class="rule-body">{{ plain(rule.body) }}</p>
           <img
             v-if="rule.image"
             :src="rule.image"
             class="rule-image"
             alt=""
           />
+          <p class="rule-body">{{ plain(rule.body) }}</p>
         </div>
+      </section>
+
+      <section class="card">
+        <p class="section-title">Discord 指令</p>
+        <ul class="commands">
+          <li
+            v-for="cmd in data.commands"
+            :key="cmd.name"
+            class="command"
+          >
+            <code class="cmd-name">{{ cmd.name }}</code>
+            <span class="cmd-desc">{{ cmd.description }}</span>
+          </li>
+        </ul>
       </section>
 
       <h2 class="roles-heading">角色介紹</h2>
@@ -106,6 +120,35 @@ function plain(s: string): string {
     height: 160px;
   }
 }
+
+.commands {
+  list-style: none;
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.command {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.cmd-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent-bg);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  flex-shrink: 0;
+}
+.cmd-desc {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
 .roles-heading {
   margin: 1.4rem 0 0.7rem;
   font-size: 1.05rem;
@@ -113,8 +156,13 @@ function plain(s: string): string {
 }
 .roles {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.8rem;
+}
+@media (max-width: 720px) {
+  .roles {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 @media (max-width: 640px) {
   .roles {

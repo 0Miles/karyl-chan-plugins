@@ -70,24 +70,26 @@ function flip(step: number): void {
   flex-direction: column;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-left: 4px solid var(--border-strong);
+  /* Faction accent runs along the top edge. */
+  border-top: 4px solid var(--border-strong);
   border-radius: var(--radius);
   padding: 1rem 1.1rem;
   box-shadow: var(--shadow-sm);
-  /* Uniform height before any card's detail is expanded. */
-  min-height: 360px;
+  /* Tall narrow card — uniform height before any detail expands. */
+  min-height: 480px;
   align-self: start;
 }
 .fac-arthur {
-  border-left-color: var(--faction-arthur);
+  border-top-color: var(--faction-arthur);
 }
 .fac-mordred {
-  border-left-color: var(--faction-mordred);
+  border-top-color: var(--faction-mordred);
 }
 
 .art {
   position: relative;
-  height: 180px;
+  /* Square — width is driven by the card column. */
+  aspect-ratio: 1;
   margin-bottom: 0.7rem;
 }
 /* Front card face. */
