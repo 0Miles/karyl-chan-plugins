@@ -217,6 +217,123 @@ export async function api<T>(
   throw new Error("unreachable");
 }
 
+// ── Game-board session ────────────────────────────────────────────
+// The per-player game board uses a different token from the admin
+// panel: a `plugin-session` JWT minted by /avalon webui that carries
+// no capabilities (authorized purely by its embedded guildId) and
+// lives ~6 h. No exchange / refresh dance — it outlasts a game.
+
+const GAME_SESSION_KEY = "avalon_game_session";
+
+export interface GameSession {
+  /** The raw plugin-session JWT. */
+  token: string;
+  /** Channel whose game this board shows — from the link's `?c=`. */
+  channelId: string;
+}
+
+let _game: GameSession | null = null;
+
+export function setGameSession(s: GameSession): void {
+  _game = s;
+  sessionStorage.setItem(GAME_SESSION_KEY, JSON.stringify(s));
+}
+
+export function loadStoredGameSession(): GameSession | null {
+  const raw = sessionStorage.getItem(GAME_SESSION_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as GameSession;
+    if (
+      typeof parsed.token === "string" &&
+      typeof parsed.channelId === "string"
+    ) {
+      _game = parsed;
+      return parsed;
+    }
+  } catch {
+    // fall through
+  }
+  sessionStorage.removeItem(GAME_SESSION_KEY);
+  return null;
+}
+
+export function currentChannelId(): string | null {
+  return _game?.channelId ?? null;
+}
+
+/** Read + strip the `?c=<channelId>` param the webui link carries. */
+export function readChannelFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const c = params.get("c");
+  if (!c) return null;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("c");
+  window.history.replaceState({}, "", url.toString());
+  return c;
+}
+
+/** An Error carrying the HTTP status that produced it. */
+export interface HttpError extends Error {
+  status?: number;
+}
+
+async function gameFetch(
+  method: string,
+  path: string,
+): Promise<Response> {
+  if (!_game) {
+    const err: HttpError = new Error("no game session");
+    err.status = 401;
+    throw err;
+  }
+  return fetch(API_BASE + path, {
+    method,
+    headers: { authorization: `Bearer ${_game.token}` },
+  });
+}
+
+/** GET a game-board JSON endpoint with the session bearer token. */
+export async function gameApi<T>(path: string): Promise<T> {
+  const res = await gameFetch("GET", path);
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) msg = String(body.error);
+    } catch {
+      // keep status
+    }
+    const err: HttpError = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Mint a short-lived SSE ticket (EventSource can't send headers). */
+export async function mintSseTicket(): Promise<string> {
+  const res = await gameFetch("POST", "/api/game/sse-ticket");
+  if (!res.ok) {
+    const err: HttpError = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const body = await res.json();
+  if (typeof body?.ticket !== "string") {
+    throw new Error("malformed ticket response");
+  }
+  return body.ticket;
+}
+
+export function gameSseUrl(channelId: string, ticket: string): string {
+  return (
+    `${API_BASE}/api/game/events` +
+    `?channel=${encodeURIComponent(channelId)}` +
+    `&ticket=${encodeURIComponent(ticket)}`
+  );
+}
+
 declare global {
   interface Window {
     __PLUGIN_BASE__?: string;

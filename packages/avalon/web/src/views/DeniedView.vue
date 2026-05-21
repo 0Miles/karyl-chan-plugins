@@ -6,9 +6,7 @@ defineProps<{ message: string | null }>();
   <div class="center-msg">
     <h2>無存取權限</h2>
     <p>{{ message }}</p>
-    <p class="hint">
-      於 Discord 內執行 <code>/avalon manage</code> 即可取得新連結。
-    </p>
+    <p class="hint">請回到 Discord 重新取得連結。</p>
   </div>
 </template>
 
