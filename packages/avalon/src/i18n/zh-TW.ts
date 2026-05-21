@@ -44,6 +44,24 @@ export const zhTW = {
   "webui.botRejected":
     "Bot 拒絕了登入請求 — 可能 `auth.session` RPC scope 尚未核可。",
   "webui.notAllowed": "Bot 未核發遊戲板連結，請稍後再試。",
+  "command.avalon.manual.description": "取得阿瓦隆規則與角色說明手冊",
+  "manual.title": "阿瓦隆說明手冊",
+  "manual.description": "阿瓦隆的規則說明與全角色介紹，隨時可查。",
+  "manual.openButton": "開啟說明手冊",
+  "manual.intro":
+    "阿瓦隆是一場藍方與紅方的隱藏身分對決：藍方要在不暴露梅林的前提下完成任務，紅方則藏身其中破壞任務。下面是規則摘要與全角色介紹。",
+  "manual.rule.goal.title": "遊戲目標",
+  "manual.rule.goal.body":
+    "玩家分為亞瑟陣營（藍方）與莫德雷德陣營（紅方）。藍方要讓 3 次任務成功，紅方要讓 3 次任務失敗；即使藍方完成任務，紅方的刺客仍有一次刺殺梅林反敗為勝的機會。",
+  "manual.rule.flow.title": "回合流程",
+  "manual.rule.flow.body":
+    "每回合由隊長提名一支任務隊伍，全體公開投票表決是否通過。通過後，隊伍成員各自祕密投出任務的成功或失敗票——只要出現失敗票（第 4 任務在 7 人以上需 2 張），該次任務即失敗。隊伍若連續 5 次提名遭否決，紅方直接獲勝。",
+  "manual.rule.win.title": "勝負條件",
+  "manual.rule.win.body":
+    "任務失敗 3 次，紅方獲勝。任務成功 3 次後，刺客可指認一名玩家為梅林：猜中則紅方逆轉勝，猜錯則藍方獲勝。",
+  "manual.rule.lake.title": "湖中女神",
+  "manual.rule.lake.body":
+    "7 人以上的對局會啟用湖中女神。持有者可查驗一名玩家的真實陣營，查驗後信物傳給被查驗者。這是少數能確認他人陣營的途徑。",
   "manage.title": "阿瓦隆管理面板",
   "manage.description":
     "查看進行中對局與報名，必要時可強制終止。15 分鐘內開啟連結；瀏覽頁籤之後會自動續約最多 1 天。",

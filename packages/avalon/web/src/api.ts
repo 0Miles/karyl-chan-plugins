@@ -334,6 +334,17 @@ export function gameSseUrl(channelId: string, ticket: string): string {
   );
 }
 
+// ── Public manual ─────────────────────────────────────────────────
+// The rules + role manual is unauthenticated reference content.
+
+export async function getManual(): Promise<
+  import("./game-types").ManualData
+> {
+  const res = await fetch(`${API_BASE}/api/manual`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<import("./game-types").ManualData>;
+}
+
 declare global {
   interface Window {
     __PLUGIN_BASE__?: string;

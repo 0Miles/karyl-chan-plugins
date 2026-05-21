@@ -47,6 +47,8 @@ import {
   saveVariantArt,
 } from "./art.js";
 import { seatRankAmongSameRole } from "./flow/stages.js";
+import { ROLES, type Position } from "./game/roles.js";
+import { t } from "./i18n/index.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const MANAGE_CAP = "manage";
@@ -722,6 +724,35 @@ export async function registerWebRoutes(
     },
   );
 
+  // ── Public rules + role manual ────────────────────────────────────
+  // No auth — pure reference content (rules + role descriptions),
+  // pulled from the same i18n the Discord side uses so the wording
+  // lives in one place. Backs the /manual SPA route.
+  const MANUAL_ROLE_ORDER: Position[] = [
+    "merlin",
+    "percival",
+    "loyal",
+    "assassin",
+    "morgana",
+    "mordred",
+    "oberon",
+    "minion",
+  ];
+  server.get("/api/manual", async () => ({
+    intro: t(undefined, "manual.intro"),
+    rules: (["goal", "flow", "win", "lake"] as const).map((key) => ({
+      title: t(undefined, `manual.rule.${key}.title`),
+      body: t(undefined, `manual.rule.${key}.body`),
+    })),
+    roles: MANUAL_ROLE_ORDER.map((position) => ({
+      position,
+      name: t(undefined, ROLES[position].nameKey),
+      faction: ROLES[position].faction,
+      short: t(undefined, `role.flavor.${position}`),
+      detail: t(undefined, `role.description.${position}`),
+    })),
+  }));
+
   // ── Single-page admin UI ──────────────────────────────────────────
   // The built singlefile bundle lives at dist/ui/index.html relative
   // to the compiled web-routes.js. We rewrite `window.__PLUGIN_BASE__`
@@ -742,11 +773,13 @@ export async function registerWebRoutes(
     return cachedHtml;
   }
 
-  server.get("/", async (_request, reply) => {
-    // Inject the path part of the bot's publicBaseUrl so the SPA knows
-    // its prefix when served through the bot proxy (e.g.
-    // `/plugin/karyl-avalon`). Done per-request so a late-arriving
-    // publicBaseUrl is picked up immediately.
+  /**
+   * Serve the SPA bundle. `/` is the game board / admin panel,
+   * `/manual` the public rules manual — the SPA picks the view from
+   * the path. `__PLUGIN_BASE__` is rewritten per-request so links
+   * work whether the SPA is hit direct or via the bot's proxy.
+   */
+  function serveSpa(reply: FastifyReply): string {
     let basePath = "";
     try {
       basePath = new URL(getEffectiveBase()).pathname.replace(/\/+$/, "");
@@ -782,7 +815,10 @@ export async function registerWebRoutes(
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
     return html;
-  });
+  }
+
+  server.get("/", async (_request, reply) => serveSpa(reply));
+  server.get("/manual", async (_request, reply) => serveSpa(reply));
 
   // Health probe — used by Docker compose to flip the container's
   // health status to `healthy`. Kept open (no auth) so the orchestrator

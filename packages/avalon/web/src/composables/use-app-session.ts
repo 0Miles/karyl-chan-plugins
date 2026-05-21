@@ -23,7 +23,7 @@ import {
  * the URL token once and picks the surface. A tab reload (no URL
  * token) restores whichever session is in sessionStorage.
  */
-export type AppMode = "loading" | "denied" | "manage" | "game";
+export type AppMode = "loading" | "denied" | "manage" | "game" | "manual";
 
 const PLUGIN_KEY = "karyl-avalon";
 
@@ -54,6 +54,14 @@ function ensureDeniedListener(): void {
 
 export async function bootstrapApp(): Promise<void> {
   ensureDeniedListener();
+  // The /manual route is public reference content — no token, no
+  // session; the SPA routes to it purely on the path.
+  if (
+    window.location.pathname.replace(/\/+$/, "").endsWith("/manual")
+  ) {
+    mode.value = "manual";
+    return;
+  }
   // Read + strip both query params up front, exactly once — a second
   // reader would see them already gone.
   const channelId = readChannelFromUrl();

@@ -200,6 +200,11 @@ export function buildPlugin() {
                 name: "webui",
                 description: t(undefined, "command.avalon.webui.description"),
               },
+              {
+                type: "sub_command",
+                name: "manual",
+                description: t(undefined, "command.avalon.manual.description"),
+              },
             ],
             handler: async (ctx: CommandContext): Promise<CommandReply> => {
               const guildId = ctx.guildId;
@@ -422,6 +427,19 @@ export function buildPlugin() {
                       // `c` pins the board to this channel's game;
                       // the token's guildId scopes cross-guild access.
                       `${effectiveBase()}/?token=${res.token}&c=${channelId}`,
+                    ),
+                  ],
+                  ephemeral: true,
+                };
+              }
+              if (sub === "manual") {
+                // Pure reference content — no game required, no auth.
+                return {
+                  content: `📖 **${t(undefined, "manual.title")}**\n${t(undefined, "manual.description")}`,
+                  components: [
+                    linkButtonRow(
+                      `📖 ${t(undefined, "manual.openButton")}`,
+                      `${effectiveBase()}/manual`,
                     ),
                   ],
                   ephemeral: true,

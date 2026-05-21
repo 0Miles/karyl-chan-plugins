@@ -113,3 +113,18 @@ export interface GameSnapshotView {
 export interface GoneSnapshot {
   gone: true;
 }
+
+/** Payload of the public GET /api/manual endpoint. */
+export interface ManualData {
+  intro: string;
+  rules: Array<{ title: string; body: string }>;
+  roles: Array<{
+    position: RolePosition;
+    name: string;
+    faction: Faction;
+    /** One-line flavour. */
+    short: string;
+    /** Full description — multi-paragraph. */
+    detail: string;
+  }>;
+}

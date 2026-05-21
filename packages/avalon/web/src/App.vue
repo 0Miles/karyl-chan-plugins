@@ -5,6 +5,7 @@ import AppToast from "./components/AppToast.vue";
 import DeniedView from "./views/DeniedView.vue";
 import ManageView from "./views/ManageView.vue";
 import GameBoardView from "./views/GameBoardView.vue";
+import ManualView from "./views/ManualView.vue";
 import { useAppSession } from "./composables/use-app-session";
 
 const { mode, deniedMessage, bootstrap } = useAppSession();
@@ -13,8 +14,9 @@ onMounted(bootstrap);
 </script>
 
 <template>
-  <!-- Game board renders its own page shell. -->
+  <!-- Game board + manual render their own page shell. -->
   <GameBoardView v-if="mode === 'game'" />
+  <ManualView v-else-if="mode === 'manual'" />
 
   <!-- Admin panel + loading / denied states share the admin shell. -->
   <div v-else class="app-wrap">
