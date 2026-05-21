@@ -68,6 +68,13 @@ export const END_REASON_LABEL: Record<string, string> = {
   "merlin-survived": "梅林在刺殺中存活",
 };
 
+export interface EventLine {
+  icon: string;
+  text: string;
+  /** Per-player ballots — set for public-vote events only. */
+  ballots?: Array<{ name: string; vote: "yes" | "no" }>;
+}
+
 /**
  * One-line zh-TW description of a timeline event. `seatName` maps a
  * 0-based seat index to a display name.
@@ -75,7 +82,7 @@ export const END_REASON_LABEL: Record<string, string> = {
 export function describeEvent(
   ev: GameEvent,
   seatName: (seat: number) => string,
-): { icon: string; text: string } {
+): EventLine {
   switch (ev.kind) {
     case "team-proposed":
       return {
@@ -88,6 +95,11 @@ export function describeEvent(
       return {
         icon: ev.approved ? "✅" : "🚫",
         text: `隊伍投票${ev.approved ? "通過" : "遭否決"}（贊成 ${ev.yes} · 反對 ${ev.no}）`,
+        // Public votes are open information — list every seat's ballot.
+        ballots: ev.ballots.map((b) => ({
+          name: seatName(b.seat),
+          vote: b.vote,
+        })),
       };
     case "mission-result":
       return {

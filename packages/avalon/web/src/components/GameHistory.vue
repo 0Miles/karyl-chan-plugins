@@ -39,6 +39,15 @@ function clockOf(ms: number): string {
         <span class="icon">{{ row.icon }}</span>
         <span class="body">
           <span class="text">{{ row.text }}</span>
+          <ul v-if="row.ballots" class="ballots">
+            <li
+              v-for="b in row.ballots"
+              :key="b.name"
+              :class="b.vote === 'yes' ? 'ballot--yes' : 'ballot--no'"
+            >
+              {{ b.vote === "yes" ? "✅" : "❌" }} {{ b.name }}
+            </li>
+          </ul>
           <span class="time">{{ clockOf(row.at) }}</span>
         </span>
       </li>
@@ -71,6 +80,23 @@ function clockOf(ms: number): string {
 }
 .text {
   color: var(--text);
+}
+.ballots {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.5rem;
+  margin: 0.25rem 0 0.1rem;
+}
+.ballots li {
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+.ballot--yes {
+  color: var(--faction-arthur);
+}
+.ballot--no {
+  color: var(--faction-mordred);
 }
 .time {
   font-size: 0.7rem;
