@@ -26,7 +26,8 @@ import {
 } from "../game/roles.js";
 import { editMessage, sendMessage } from "./discord.js";
 import { enrichPlayerProfiles } from "./profiles.js";
-import { renderDealReveal, sendDealBoard } from "./stages.js";
+import { renderDealReveal } from "./stages.js";
+import { openAppoint } from "./stages-appoint.js";
 import { sampleNpcDisplayNames } from "../npc/names.js";
 
 /**
@@ -328,7 +329,9 @@ async function handleStartClick(
   // guild sees. Best-effort — falls back to sign-up names on failure.
   await enrichPlayerProfiles(game);
   // Re-paint the sign-up message into a "dealing" snapshot so the
-  // channel scrollback has a record, then post the reveal board.
+  // channel scrollback has a record, then open the first round.
+  // Roles are no longer revealed in-channel — players read their
+  // card on the game board (/avalon webui) or via /avalon card.
   await editMessage({
     channelId: signup.channelId,
     messageId: signup.messageId,
@@ -343,7 +346,7 @@ async function handleStartClick(
     ],
     components: [],
   });
-  await sendDealBoard(game);
+  await openAppoint(game);
   return null;
 }
 

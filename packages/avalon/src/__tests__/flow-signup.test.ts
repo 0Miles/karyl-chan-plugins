@@ -115,8 +115,8 @@ describe("B-001: signup minimum bumped to 5; 4 players should reject at signup",
   });
 });
 
-describe("B-001: 5-player signup → host start triggers deal + deal board send", () => {
-  it("5 players → start succeeds; messages.send fires for deal board + appoint board", async () => {
+describe("B-001: 5-player signup → host start triggers the first round", () => {
+  it("5 players → start succeeds; the appoint board is posted", async () => {
     await buildSignupWith(5);
     harness.resetCalls();
     await handleSignupClick(
@@ -129,8 +129,10 @@ describe("B-001: 5-player signup → host start triggers deal + deal board send"
       "start",
     );
     const sends = harness.callsTo("messages.send");
-    // At least two: deal-reveal board + the appoint board it triggers.
-    expect(sends.length).toBeGreaterThanOrEqual(2);
+    // The round-1 appoint board. There is no separate deal-reveal
+    // board any more — players read their card on the game board.
+    expect(sends.length).toBeGreaterThanOrEqual(1);
+    expect(getGame("c-signup")).not.toBeNull();
   });
 });
 

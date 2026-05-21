@@ -18,14 +18,12 @@ import { getGame } from "../game/store.js";
 import {
   artAttachment,
   followupEphemeral,
-  sendMessage,
   type DiscordActionRow,
   type DiscordAttachment,
   type DiscordEmbed,
 } from "./discord.js";
 import { markerEmoji, seatEmoji } from "./presentation.js";
 import {
-  openAppoint,
   renderAppointEmbed,
   appointComponents,
 } from "./stages-appoint.js";
@@ -64,43 +62,7 @@ export function seatRankAmongSameRole(
 }
 
 /**
- * Per-channel deal-reveal board. Posted once right after `deal()`
- * runs; every player taps [查看身份] to receive their role + vision
- * grid as an ephemeral. The board itself never gets edited — players
- * can re-tap it mid-game to re-check their info.
- *
- * After posting the reveal board we immediately open the round-1
- * appoint stage so the leader can pick the first mission roster.
- */
-export async function sendDealBoard(state: GameState): Promise<void> {
-  await sendMessage({
-    channelId: state.channelId,
-    embeds: [
-      {
-        title: t(undefined, "stage.deal.title"),
-        description: t(undefined, "stage.deal.content"),
-        color: EMBED_COLOR,
-      },
-    ],
-    components: [
-      {
-        type: 1,
-        components: [
-          {
-            type: 2,
-            style: 1,
-            custom_id: componentCustomId(PLUGIN_KEY, "deal"),
-            label: t(undefined, "stage.deal.reveal"),
-          },
-        ],
-      },
-    ],
-  });
-  await openAppoint(state);
-}
-
-/**
- * Ephemeral reveal for whoever clicked the [查看身份] button. Awaits
+ * Ephemeral reveal of a player's role + vision grid. Awaits
  * the admin-uploaded role art (if any) so the embed can carry a
  * thumbnail Discord will render alongside the flavour line.
  */
