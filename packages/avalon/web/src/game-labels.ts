@@ -68,60 +68,111 @@ export const END_REASON_LABEL: Record<string, string> = {
   "merlin-survived": "梅林在刺殺中存活",
 };
 
-export interface EventLine {
+/** A per-event marker shown on a history player item. */
+export type HistoryTagKind =
+  | "leader"
+  | "mission"
+  | "yes"
+  | "no"
+  | "holder"
+  | "target"
+  | "assassin";
+
+export interface HistoryTag {
+  label: string;
+  kind: HistoryTagKind;
+}
+
+/** A player mentioned by a history event, with that event's markers. */
+export interface HistoryPlayerRef {
+  seat: number;
+  tags: HistoryTag[];
+}
+
+/** One history event rendered as an independent card. */
+export interface EventCard {
   icon: string;
-  text: string;
-  /** Per-player ballots — set for public-vote events only. */
-  ballots?: Array<{ name: string; vote: "yes" | "no" }>;
+  title: string;
+  /** Optional secondary line (tally, target role, …). */
+  note?: string;
+  /** Players the event involves — rendered as avatar + name items. */
+  players: HistoryPlayerRef[];
 }
 
 /**
- * One-line zh-TW description of a timeline event. `seatName` maps a
- * 0-based seat index to a display name.
+ * Describe a timeline event as a card: a title, an optional note, and
+ * the players it involves with per-event markers. The component
+ * resolves each `seat` to an avatar + display name.
  */
-export function describeEvent(
-  ev: GameEvent,
-  seatName: (seat: number) => string,
-): EventLine {
+export function describeEvent(ev: GameEvent): EventCard {
   switch (ev.kind) {
-    case "team-proposed":
+    case "team-proposed": {
+      // One item per involved seat; the leader who is also on the
+      // team carries both markers.
+      const bySeat = new Map<number, HistoryTag[]>();
+      for (const seat of ev.memberSeats) {
+        bySeat.set(seat, [{ label: "在隊", kind: "mission" }]);
+      }
+      bySeat.set(ev.leaderSeat, [
+        { label: "隊長", kind: "leader" },
+        ...(bySeat.get(ev.leaderSeat) ?? []),
+      ]);
       return {
         icon: "📋",
-        text: `第 ${ev.round} 回合 · ${seatName(ev.leaderSeat)} 提名隊伍：${ev.memberSeats
-          .map(seatName)
-          .join("、")}`,
+        title: `第 ${ev.round} 回合 · 隊長提名隊伍`,
+        players: [...bySeat.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([seat, tags]) => ({ seat, tags })),
       };
+    }
     case "public-vote":
       return {
         icon: ev.approved ? "✅" : "🚫",
-        text: `隊伍投票${ev.approved ? "通過" : "遭否決"}（贊成 ${ev.yes} · 反對 ${ev.no}）`,
-        // Public votes are open information — list every seat's ballot.
-        ballots: ev.ballots.map((b) => ({
-          name: seatName(b.seat),
-          vote: b.vote,
+        title: `第 ${ev.round} 回合 · 隊伍投票${ev.approved ? "通過" : "遭否決"}`,
+        note: `贊成 ${ev.yes} · 反對 ${ev.no}`,
+        players: ev.ballots.map((b) => ({
+          seat: b.seat,
+          tags: [
+            b.vote === "yes"
+              ? { label: "同意", kind: "yes" }
+              : { label: "反對", kind: "no" },
+          ],
         })),
       };
     case "mission-result":
       return {
         icon: ev.result === "success" ? "🟦" : "🟥",
-        text:
-          `第 ${ev.round} 回合任務${ev.result === "success" ? "成功" : "失敗"}` +
-          (ev.failCount > 0 ? ` · ${ev.failCount} 張失敗票` : ""),
+        title: `第 ${ev.round} 回合 · 任務${ev.result === "success" ? "成功" : "失敗"}`,
+        note: ev.failCount > 0 ? `${ev.failCount} 張失敗票` : "無失敗票",
+        players: [],
       };
     case "lake-used":
       return {
         icon: "🔮",
-        text: `${seatName(ev.holderSeat)} 用湖中女神查驗了 ${seatName(ev.targetSeat)}`,
+        title: "湖中女神查驗",
+        players: [
+          { seat: ev.holderSeat, tags: [{ label: "查驗者", kind: "holder" }] },
+          { seat: ev.targetSeat, tags: [{ label: "被查驗", kind: "target" }] },
+        ],
       };
     case "assassinate":
       return {
         icon: "🗡",
-        text: `${seatName(ev.assassinSeat)} 刺殺了 ${seatName(ev.targetSeat)}（${ROLE_NAME[ev.targetRole]}）`,
+        title: "刺客刺殺",
+        note: `目標真實身分:${ROLE_NAME[ev.targetRole]}`,
+        players: [
+          {
+            seat: ev.assassinSeat,
+            tags: [{ label: "刺客", kind: "assassin" }],
+          },
+          { seat: ev.targetSeat, tags: [{ label: "被刺殺", kind: "target" }] },
+        ],
       };
     case "game-end":
       return {
         icon: ev.winner === "arthur" ? "🏆" : "💀",
-        text: `遊戲結束 · ${FACTION_NAME[ev.winner]}勝利`,
+        title: `遊戲結束 · ${FACTION_NAME[ev.winner]}勝利`,
+        players: [],
       };
   }
 }
