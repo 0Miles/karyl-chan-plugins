@@ -152,11 +152,12 @@ function authManageAccess(
 // stream is authorized by a short-lived ticket carried in the query
 // string instead of the 6-hour session JWT. The SPA calls
 // POST /api/game/sse-ticket (Bearer session token) to mint one right
-// before opening the EventSource. The 60 s TTL bounds how long a
-// ticket sitting in a URL / proxy log stays usable; the SPA re-mints
-// on reconnect.
+// before opening the EventSource. The short TTL bounds how long a
+// ticket sitting in a URL / proxy access-log stays usable — kept
+// just above the EventSource `retry:` interval so a native
+// reconnect still succeeds; the SPA re-mints for anything longer.
 
-const SSE_TICKET_TTL_MS = 60_000;
+const SSE_TICKET_TTL_MS = 20_000;
 
 interface SseTicket {
   userId: string;
@@ -442,7 +443,12 @@ export async function registerWebRoutes(
         raw.write(": hb\n\n");
       }, 25_000);
       if (typeof heartbeat.unref === "function") heartbeat.unref();
+      // A dropped connection fires both "error" and "close" — guard
+      // so the unsubscribe runs exactly once.
+      let cleaned = false;
       const cleanup = (): void => {
+        if (cleaned) return;
+        cleaned = true;
         clearInterval(heartbeat);
         unsubscribe();
       };

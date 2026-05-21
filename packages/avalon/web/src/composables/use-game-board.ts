@@ -47,13 +47,22 @@ export function useGameBoard() {
 
   function applyFrame(data: GameSnapshotView | GoneSnapshot): void {
     if ("gone" in data) {
-      snapshot.value = null;
-      status.value = "gone";
+      markGone();
       return;
     }
     snapshot.value = data;
     // Don't downgrade a confirmed polling fallback back to "live".
     if (status.value !== "polling") status.value = "live";
+  }
+
+  /** Terminal "no game here" state — also stops the poll loop. */
+  function markGone(): void {
+    snapshot.value = null;
+    status.value = "gone";
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   }
 
   function deny(message: string): void {
@@ -75,8 +84,7 @@ export function useGameBoard() {
       if (code === 401) {
         deny(EXPIRED_MSG);
       } else if (code === 404) {
-        snapshot.value = null;
-        status.value = "gone";
+        markGone();
       }
       // Other (transient) failures keep the last good snapshot shown.
     }
@@ -85,6 +93,9 @@ export function useGameBoard() {
   function startPolling(): void {
     if (pollTimer || disposed) return;
     status.value = "polling";
+    // Fetch once right away — don't show stale data for a full
+    // interval while committing to the polling fallback.
+    void fetchState();
     pollTimer = setInterval(() => void fetchState(), POLL_INTERVAL_MS);
   }
 
