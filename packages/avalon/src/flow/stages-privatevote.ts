@@ -18,6 +18,7 @@ import {
   type GameState,
 } from "../game/state.js";
 import { getGame } from "../game/store.js";
+import { recordEvent } from "../game/events.js";
 import {
   editMessage,
   followupEphemeral,
@@ -187,7 +188,17 @@ export async function resolvePrivateVote(game: GameState): Promise<void> {
     components: [],
   });
 
+  // Timeline: record the round that just resolved BEFORE
+  // recordMissionResult bumps `game.round`. Only the aggregate fail
+  // count is stored — never who cast a fail ballot.
+  const missionRound = game.round;
   recordMissionResult(game, passed ? "success" : "fail");
+  recordEvent(game, {
+    kind: "mission-result",
+    round: missionRound,
+    result: passed ? "success" : "fail",
+    failCount,
+  });
   game.current = null;
 
   // After-mission decision tree.

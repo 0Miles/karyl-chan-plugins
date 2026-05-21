@@ -9,6 +9,7 @@ import {
   type Position,
   type RoleToggles,
 } from "./roles.js";
+import type { GameEvent } from "./events.js";
 
 /**
  * Per-channel game state. One channel hosts at most one in-flight
@@ -132,6 +133,14 @@ export interface GameState {
    * Missing entries default to 0.
    */
   mvpStats: MvpStats;
+  /**
+   * Public history timeline — appended by `recordEvent` as stages
+   * resolve, consumed by the WebUI sidebar. Holds only public-safe
+   * facts (see `events.ts`). `eventSeq` is the monotonic id source
+   * and doubles as the SSE change cursor.
+   */
+  events: GameEvent[];
+  eventSeq: number;
 }
 
 export interface MvpStats {
@@ -196,6 +205,8 @@ export function newGameState(opts: {
       rejectedRedTeam: {},
       proposedRedTeam: {},
     },
+    events: [],
+    eventSeq: 0,
   };
 }
 

@@ -12,6 +12,7 @@ import {
   type GameState,
 } from "../game/state.js";
 import { getGame } from "../game/store.js";
+import { recordEvent } from "../game/events.js";
 import { ROLES } from "../game/roles.js";
 import {
   editMessage,
@@ -97,6 +98,14 @@ export async function handleAssassinateClick(
   if (target.userId === me.userId) return null;
 
   game.assassinTargetIndex = seat;
+  // Timeline: the assassinate result is fully public — the in-game
+  // board reveals the target's true role to everyone.
+  recordEvent(game, {
+    kind: "assassinate",
+    assassinSeat: me.index,
+    targetSeat: target.index,
+    targetRole: target.position,
+  });
   const verdict = settleAssassinate(game);
   await editMessage({
     channelId: game.channelId,

@@ -7,6 +7,7 @@ import {
   type Verdict,
 } from "../game/state.js";
 import { ROLES } from "../game/roles.js";
+import { recordEvent } from "../game/events.js";
 import { removeGame } from "../game/store.js";
 import { findArt, findVariantArt, isVariantPosition } from "../art.js";
 import {
@@ -33,6 +34,15 @@ export async function endGame(state: GameState, verdict: Verdict): Promise<void>
   state.stage = "ended";
   state.winner = verdict.winner ?? null;
   state.current = null;
+  // Timeline: final verdict. Recorded before the roster reveal embed
+  // is built so the WebUI's last event matches the channel's.
+  if (verdict.winner) {
+    recordEvent(state, {
+      kind: "game-end",
+      winner: verdict.winner,
+      reason: verdict.reason ?? "",
+    });
+  }
   const rosterLines = state.players.map((p) => {
     const role = t(undefined, ROLES[p.position].nameKey);
     return `\`${p.index + 1}\` ${factionMarker(p)} ${p.displayName} — **${role}**`;

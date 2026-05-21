@@ -37,6 +37,7 @@ import {
   type Player,
 } from "../game/state.js";
 import { evaluateVerdict } from "../game/state.js";
+import { recordEvent } from "../game/events.js";
 import { ROLES } from "../game/roles.js";
 import { withChannelLock, getGame } from "../game/store.js";
 import { t } from "../i18n/index.js";
@@ -338,6 +339,11 @@ async function performLake(state: GameState, npc: Player): Promise<void> {
   npc.lakeTarget = target.userId;
   state.ladyHolderIndex = target.index;
   state.ladyUseCount++;
+  recordEvent(state, {
+    kind: "lake-used",
+    holderSeat: npc.index,
+    targetSeat: target.index,
+  });
   const messageId = state.current.messageId;
   // Use the shared board renderer so the NPC path keeps the lake
   // thumbnail embedded — a hand-rolled embed here would drop the
@@ -370,6 +376,12 @@ async function performAssassinate(
   const target = playerByIndex(state, targetSeat);
   if (!target || target.userId === npc.userId) return;
   state.assassinTargetIndex = targetSeat;
+  recordEvent(state, {
+    kind: "assassinate",
+    assassinSeat: npc.index,
+    targetSeat: target.index,
+    targetRole: target.position,
+  });
   const verdict = settleAssassinate(state);
   await editMessage({
     channelId: state.channelId,

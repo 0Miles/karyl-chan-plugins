@@ -14,6 +14,7 @@ import {
   type GameState,
 } from "../game/state.js";
 import { getGame } from "../game/store.js";
+import { recordEvent } from "../game/events.js";
 import {
   editMessage,
   followupEphemeral,
@@ -170,6 +171,13 @@ export async function handleLakeClick(
   holder.lakeTarget = target.userId;
   game.ladyHolderIndex = target.index;
   game.ladyUseCount++;
+  // Timeline: who inspected whom is public; the revealed faction is
+  // the holder's private knowledge and is deliberately not recorded.
+  recordEvent(game, {
+    kind: "lake-used",
+    holderSeat: holder.index,
+    targetSeat: target.index,
+  });
 
   await editLakeCheckedBoard(
     game.channelId,

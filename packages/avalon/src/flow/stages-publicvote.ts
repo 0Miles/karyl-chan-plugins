@@ -15,6 +15,7 @@ import {
   type GameState,
 } from "../game/state.js";
 import { getGame } from "../game/store.js";
+import { recordEvent } from "../game/events.js";
 import {
   editMessage,
   sendMessage,
@@ -60,6 +61,15 @@ export async function openPublicVote(
     missionMembers,
     votes: {},
   };
+  // Timeline: the leader locked this roster. Emitted here — the
+  // single convergence point both the human (confirmAppoint) and the
+  // NPC (driver.performAppoint) appoint paths funnel through.
+  recordEvent(state, {
+    kind: "team-proposed",
+    round: state.round,
+    leaderSeat: state.leaderIndex,
+    memberSeats: missionMembers,
+  });
   scheduleNpcStep(state);
 }
 
@@ -101,12 +111,28 @@ export async function handlePublicVoteClick(
 
 export async function resolvePublicVote(game: GameState): Promise<void> {
   if (game.current?.kind !== "publicVote") return;
-  const votes = Object.values(game.current.votes);
+  const votesByUser = game.current.votes;
+  const votes = Object.values(votesByUser);
   const yes = votes.filter((v) => v === "yes").length;
   const no = votes.length - yes;
   const passed = yes > no;
   const missionMembers = game.current.missionMembers;
   const messageId = game.current.messageId;
+
+  // Timeline: public-vote ballots are open information once resolved
+  // (the board reveals every seat's vote), so recording them here
+  // leaks nothing the channel doesn't already show.
+  recordEvent(game, {
+    kind: "public-vote",
+    round: game.round,
+    approved: passed,
+    yes,
+    no,
+    ballots: game.players.map((p) => ({
+      seat: p.index,
+      vote: votesByUser[p.userId] ?? "no",
+    })),
+  });
 
   // Reveal the final tally + every player's ballot on the board.
   await editMessage({
