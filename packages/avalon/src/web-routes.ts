@@ -29,6 +29,8 @@ import { clearCurrentStageButtons } from "./flow/stop.js";
 import {
   artFilePath,
   extForMime,
+  findArt,
+  findVariantArt,
   isSafeArtFilename,
   isValidAssetKey,
   isValidPosition,
@@ -44,6 +46,7 @@ import {
   saveAsset,
   saveVariantArt,
 } from "./art.js";
+import { seatRankAmongSameRole } from "./flow/stages.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const MANAGE_CAP = "manage";
@@ -380,6 +383,36 @@ export async function registerWebRoutes(
       const game = gameForViewer(channelId, claims.guildId, reply);
       if (!game) return;
       return buildSnapshot(game, claims.userId);
+    },
+  );
+
+  // The viewer's own role-card artwork URL (admin-uploaded art).
+  // null when the viewer isn't a seated player or no art is stored —
+  // the board falls back to a text-only card. Resolves the variant
+  // slot the same way the in-channel deal-reveal does.
+  server.get<{ Querystring: { channel?: string } }>(
+    "/api/game/role-art",
+    async (request, reply) => {
+      const claims = auth(request, reply);
+      if (!claims) return;
+      const channelId = request.query.channel;
+      if (typeof channelId !== "string" || channelId.length === 0) {
+        return reply.code(400).send({ error: "channel query param required" });
+      }
+      const game = gameForViewer(channelId, claims.guildId, reply);
+      if (!game) return;
+      const player = game.players.find((p) => p.userId === claims.userId);
+      if (!player) return { url: null };
+      const art = isVariantPosition(player.position)
+        ? await findVariantArt(
+            player.position,
+            seatRankAmongSameRole(game.players, player),
+          )
+        : await findArt(player.position);
+      if (!art) return { url: null };
+      return {
+        url: `${getEffectiveBase()}/art/${art.filename}?v=${art.etag}`,
+      };
     },
   );
 

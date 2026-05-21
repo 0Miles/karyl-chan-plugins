@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useGameBoard } from "../composables/use-game-board";
+import { currentChannelId, gameApi } from "../api";
 import GamePlayerList from "../components/GamePlayerList.vue";
 import GameHistory from "../components/GameHistory.vue";
 import {
@@ -15,6 +16,29 @@ import {
 const { snapshot, status, deniedMessage, connect } = useGameBoard();
 
 onMounted(connect);
+
+// The viewer's role-card artwork. Fetched once — the role is fixed
+// for the game — as soon as the first snapshot reveals a role.
+const roleArt = ref<string | null>(null);
+let roleArtRequested = false;
+watch(
+  () => snapshot.value?.viewer.role,
+  async (role) => {
+    if (roleArtRequested || !role) return;
+    roleArtRequested = true;
+    const channel = currentChannelId();
+    if (!channel) return;
+    try {
+      const res = await gameApi<{ url: string | null }>(
+        `/api/game/role-art?channel=${encodeURIComponent(channel)}`,
+      );
+      roleArt.value = res.url;
+    } catch {
+      // Best-effort — the card falls back to a text-only layout.
+    }
+  },
+  { immediate: true },
+);
 
 const statusPill = computed(() => {
   switch (status.value) {
@@ -119,10 +143,20 @@ const missions = computed(() => {
         <div class="card role-card" :class="snapshot.viewer.faction ? `fac-${snapshot.viewer.faction}` : ''">
           <p class="section-title">你的角色</p>
           <template v-if="snapshot.viewer.isPlayer && snapshot.viewer.role">
-            <p class="role-name">{{ ROLE_NAME[snapshot.viewer.role] }}</p>
-            <p v-if="snapshot.viewer.faction" class="role-faction">
-              {{ FACTION_NAME[snapshot.viewer.faction] }}
-            </p>
+            <div class="role-head">
+              <img
+                v-if="roleArt"
+                :src="roleArt"
+                class="role-img"
+                alt=""
+              />
+              <div class="role-id">
+                <p class="role-name">{{ ROLE_NAME[snapshot.viewer.role] }}</p>
+                <p v-if="snapshot.viewer.faction" class="role-faction">
+                  {{ FACTION_NAME[snapshot.viewer.faction] }}
+                </p>
+              </div>
+            </div>
             <p class="role-ability">{{ ROLE_ABILITY[snapshot.viewer.role] }}</p>
           </template>
           <p v-else class="role-spectator">
@@ -255,10 +289,27 @@ const missions = computed(() => {
 .role-card.fac-mordred {
   border-left: 4px solid var(--faction-mordred);
 }
+.role-head {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.4rem;
+}
+.role-img {
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-surface-2);
+}
+.role-id {
+  min-width: 0;
+}
 .role-name {
   font-size: 1.2rem;
   font-weight: 700;
-  margin-top: 0.3rem;
 }
 .role-faction {
   font-size: 0.84rem;
