@@ -10,37 +10,43 @@ import type {
   VisionMarker,
 } from "./game-types";
 
+// Role names, faction names and ability lines are kept in step with
+// the bot's Discord-side i18n (src/i18n/zh-TW.ts) — same terminology
+// so a player sees one consistent vocabulary across Discord and the
+// WebUI. The ability lines mirror the `role.flavor.*` keys.
+
 export const ROLE_NAME: Record<RolePosition, string> = {
   merlin: "梅林",
   percival: "派西維爾",
   assassin: "刺客",
   morgana: "莫甘娜",
-  mordred: "莫德雷",
+  mordred: "莫德雷德",
   oberon: "奧伯倫",
   loyal: "亞瑟的忠臣",
-  minion: "莫德雷的爪牙",
+  minion: "莫德雷德的爪牙",
 };
 
 export const ROLE_ABILITY: Record<RolePosition, string> = {
-  merlin: "你能看見大部分壞人（莫德雷除外）。別讓刺客找出你。",
-  percival: "你能看見梅林與莫甘娜，但分不出誰是誰。",
-  loyal: "你沒有特殊視野，協助好人完成三場任務。",
-  assassin: "好人達標時你能刺殺一人；猜中梅林即逆轉勝。",
-  morgana: "你在派西維爾眼中與梅林無異，用來混淆他。",
-  mordred: "梅林看不見你——你是壞人陣營的隱藏王牌。",
-  oberon: "你與其他壞人互相看不見，獨自行動。",
-  minion: "莫德雷的爪牙，設法讓任務失敗。",
+  merlin:
+    "你看得見莫甘娜、刺客、奧伯倫（莫德雷德除外）。別讓刺客找出你。",
+  percival: "你看見梅林與莫甘娜，但分不清誰是誰。保護真正的梅林。",
+  loyal: "你看不見任何身份。觀察行為，跟隨梅林的暗示。",
+  assassin: "三次任務成功後，你有一次機會擊殺梅林、反敗為勝。",
+  morgana: "派西維爾會把你誤認成梅林。儘量假裝藍方。",
+  mordred: "連梅林也看不見你，潛伏吧。",
+  oberon: "你看不見隊友、隊友也看不見你。獨自破壞任務。",
+  minion: "你看得見除奧伯倫外的紅方夥伴，與其他紅角合作破壞任務。",
 };
 
 export const FACTION_NAME: Record<Faction, string> = {
-  arthur: "亞瑟王陣營",
-  mordred: "莫德雷陣營",
+  arthur: "亞瑟陣營",
+  mordred: "莫德雷德陣營",
 };
 
 export const MARKER_LABEL: Record<VisionMarker, string> = {
   self: "你自己",
-  red: "壞人",
-  blue: "好人",
+  red: "紅方",
+  blue: "藍方",
   purple: "梅林或莫甘娜",
   unknown: "未知",
 };
@@ -79,7 +85,7 @@ export const CURRENT_STAGE_LABEL: Record<string, string> = {
 };
 
 export const END_REASON_LABEL: Record<string, string> = {
-  "missions-clean": "好人連續完成三場任務",
+  "missions-clean": "藍方連續完成三場任務",
   "missions-then-assassinate": "三場任務成功，進入刺殺",
   "missions-failed": "任務失敗三次",
   rejections: "隊伍連續被否決五次",
