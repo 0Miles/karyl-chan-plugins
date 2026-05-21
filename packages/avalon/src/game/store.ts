@@ -76,6 +76,35 @@ export function getEndedGame(channelId: string): GameState | null {
 }
 
 /**
+ * Resolve the game in `channelId` whose `sessionId` matches — the
+ * active game, or a still-retained ended one. Returns null when that
+ * specific session is gone (e.g. a fresh `/avalon start` now occupies
+ * the channel with a different session).
+ *
+ * The WebUI passes the sessionId from its link so a board stays
+ * pinned to the exact game instance it was issued for, instead of
+ * silently following whatever game currently holds the channel.
+ * `sessionId` is also the stable key a future record-persistence /
+ * spectator feature would index games by.
+ */
+export function getGameBySession(
+  channelId: string,
+  sessionId: string,
+): GameState | null {
+  const active = games.get(channelId);
+  if (active && active.sessionId === sessionId) return active;
+  const ended = endedGames.get(channelId);
+  if (
+    ended &&
+    ended.expiresAt > Date.now() &&
+    ended.state.sessionId === sessionId
+  ) {
+    return ended.state;
+  }
+  return null;
+}
+
+/**
  * Per-channel promise-chain lock. Slash commands, button handlers, and
  * the WebUI all mutate the same `GameState`; mutations must serialise
  * per channel so e.g. two players clicking "join" in the same

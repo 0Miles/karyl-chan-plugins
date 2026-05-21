@@ -230,6 +230,12 @@ export interface GameSession {
   token: string;
   /** Channel whose game this board shows — from the link's `?c=`. */
   channelId: string;
+  /**
+   * Game instance id — from the link's `?s=`. Pins the board to one
+   * game so a later game in the same channel can't hijack the link.
+   * Empty for legacy links issued before sessionId routing.
+   */
+  sessionId: string;
 }
 
 let _game: GameSession | null = null;
@@ -248,6 +254,8 @@ export function loadStoredGameSession(): GameSession | null {
       typeof parsed.token === "string" &&
       typeof parsed.channelId === "string"
     ) {
+      // Tolerate a legacy stored session with no sessionId.
+      if (typeof parsed.sessionId !== "string") parsed.sessionId = "";
       _game = parsed;
       return parsed;
     }
@@ -262,15 +270,28 @@ export function currentChannelId(): string | null {
   return _game?.channelId ?? null;
 }
 
-/** Read + strip the `?c=<channelId>` param the webui link carries. */
-export function readChannelFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const c = params.get("c");
-  if (!c) return null;
+export function currentSessionId(): string {
+  return _game?.sessionId ?? "";
+}
+
+/** Read + strip a query param the webui link carries. */
+function readAndStripParam(name: string): string | null {
+  const value = new URLSearchParams(window.location.search).get(name);
+  if (!value) return null;
   const url = new URL(window.location.href);
-  url.searchParams.delete("c");
+  url.searchParams.delete(name);
   window.history.replaceState({}, "", url.toString());
-  return c;
+  return value;
+}
+
+/** Read + strip the `?c=<channelId>` param. */
+export function readChannelFromUrl(): string | null {
+  return readAndStripParam("c");
+}
+
+/** Read + strip the `?s=<sessionId>` param. */
+export function readSessionFromUrl(): string | null {
+  return readAndStripParam("s");
 }
 
 /** An Error carrying the HTTP status that produced it. */
@@ -326,10 +347,15 @@ export async function mintSseTicket(): Promise<string> {
   return body.ticket;
 }
 
-export function gameSseUrl(channelId: string, ticket: string): string {
+export function gameSseUrl(
+  channelId: string,
+  sessionId: string,
+  ticket: string,
+): string {
   return (
     `${API_BASE}/api/game/events` +
     `?channel=${encodeURIComponent(channelId)}` +
+    `&session=${encodeURIComponent(sessionId)}` +
     `&ticket=${encodeURIComponent(ticket)}`
   );
 }

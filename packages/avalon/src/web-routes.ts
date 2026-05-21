@@ -19,6 +19,7 @@ import { PLUGIN_KEY } from "./constants.js";
 import {
   getEndedGame,
   getGame,
+  getGameBySession,
   listGames,
   removeGame,
 } from "./game/store.js";
@@ -354,12 +355,18 @@ export async function registerWebRoutes(
    */
   function gameForViewer(
     channelId: string,
+    sessionId: string | null,
     guildId: string | null,
     reply: FastifyReply,
   ): ReturnType<typeof getGame> {
-    const game = getGame(channelId) ?? getEndedGame(channelId);
+    // With a sessionId the board is pinned to that exact game
+    // instance; without one (legacy links) fall back to whatever
+    // game currently holds the channel.
+    const game = sessionId
+      ? getGameBySession(channelId, sessionId)
+      : getGame(channelId) ?? getEndedGame(channelId);
     if (!game) {
-      reply.code(404).send({ error: "No game in this channel" });
+      reply.code(404).send({ error: "No game for this session" });
       return null;
     }
     // The session token is guild-scoped; never let it read a game in
@@ -373,7 +380,7 @@ export async function registerWebRoutes(
 
   // Per-viewer snapshot — initial paint + the polling fallback the
   // SPA uses when SSE can't get through a buffering proxy.
-  server.get<{ Querystring: { channel?: string } }>(
+  server.get<{ Querystring: { channel?: string; session?: string } }>(
     "/api/game/state",
     async (request, reply) => {
       const claims = auth(request, reply);
@@ -382,7 +389,11 @@ export async function registerWebRoutes(
       if (typeof channelId !== "string" || channelId.length === 0) {
         return reply.code(400).send({ error: "channel query param required" });
       }
-      const game = gameForViewer(channelId, claims.guildId, reply);
+      const sessionId =
+        typeof request.query.session === "string"
+          ? request.query.session
+          : null;
+      const game = gameForViewer(channelId, sessionId, claims.guildId, reply);
       if (!game) return;
       return buildSnapshot(game, claims.userId);
     },
@@ -392,7 +403,7 @@ export async function registerWebRoutes(
   // null when the viewer isn't a seated player or no art is stored —
   // the board falls back to a text-only card. Resolves the variant
   // slot the same way the in-channel deal-reveal does.
-  server.get<{ Querystring: { channel?: string } }>(
+  server.get<{ Querystring: { channel?: string; session?: string } }>(
     "/api/game/role-art",
     async (request, reply) => {
       const claims = auth(request, reply);
@@ -401,7 +412,11 @@ export async function registerWebRoutes(
       if (typeof channelId !== "string" || channelId.length === 0) {
         return reply.code(400).send({ error: "channel query param required" });
       }
-      const game = gameForViewer(channelId, claims.guildId, reply);
+      const sessionId =
+        typeof request.query.session === "string"
+          ? request.query.session
+          : null;
+      const game = gameForViewer(channelId, sessionId, claims.guildId, reply);
       if (!game) return;
       const player = game.players.find((p) => p.userId === claims.userId);
       if (!player) return { url: null };
@@ -427,7 +442,9 @@ export async function registerWebRoutes(
 
   // SSE stream — live per-viewer snapshots. Ticket-authorized (the
   // browser EventSource API can't set an Authorization header).
-  server.get<{ Querystring: { channel?: string; ticket?: string } }>(
+  server.get<{
+    Querystring: { channel?: string; ticket?: string; session?: string };
+  }>(
     "/api/game/events",
     (request, reply) => {
       const channelId = request.query.channel;
@@ -446,11 +463,21 @@ export async function registerWebRoutes(
         reply.code(401).send({ error: "Invalid or expired ticket" });
         return;
       }
-      const game = getGame(channelId) ?? getEndedGame(channelId);
+      const sessionId =
+        typeof request.query.session === "string"
+          ? request.query.session
+          : null;
+      const game = sessionId
+        ? getGameBySession(channelId, sessionId)
+        : getGame(channelId) ?? getEndedGame(channelId);
       if (game && (!ticket.guildId || game.guildId !== ticket.guildId)) {
         reply.code(403).send({ error: "Game belongs to another guild" });
         return;
       }
+      // The stream is pinned to a specific game instance — the
+      // requested session, or (legacy links) the channel's current
+      // one — so it never silently follows a later game.
+      const pinSession = sessionId ?? game?.sessionId ?? "";
 
       // Hand the socket off — we own the raw response until close.
       reply.hijack();
@@ -471,6 +498,7 @@ export async function registerWebRoutes(
       send(game ? buildSnapshot(game, ticket.userId) : { gone: true });
       const unsubscribe = subscribe(channelId, {
         userId: ticket.userId,
+        sessionId: pinSession,
         send,
       });
       // Comment-only heartbeat keeps idle proxies from dropping us.

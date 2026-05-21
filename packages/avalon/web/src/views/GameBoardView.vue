@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useGameBoard } from "../composables/use-game-board";
-import { currentChannelId, gameApi } from "../api";
+import { currentChannelId, currentSessionId, gameApi } from "../api";
 import GamePlayerList from "../components/GamePlayerList.vue";
 import GameHistory from "../components/GameHistory.vue";
 import {
@@ -30,7 +30,8 @@ watch(
     if (!channel) return;
     try {
       const res = await gameApi<{ url: string | null }>(
-        `/api/game/role-art?channel=${encodeURIComponent(channel)}`,
+        `/api/game/role-art?channel=${encodeURIComponent(channel)}` +
+          `&session=${encodeURIComponent(currentSessionId())}`,
       );
       roleArt.value = res.url;
     } catch {

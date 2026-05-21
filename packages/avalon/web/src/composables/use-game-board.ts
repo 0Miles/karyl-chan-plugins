@@ -1,6 +1,7 @@
 import { onUnmounted, ref, shallowRef } from "vue";
 import {
   currentChannelId,
+  currentSessionId,
   gameApi,
   gameSseUrl,
   mintSseTicket,
@@ -39,6 +40,7 @@ export function useGameBoard() {
   const deniedMessage = ref<string | null>(null);
 
   const channelId = currentChannelId();
+  const sessionId = currentSessionId();
   let es: EventSource | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -76,7 +78,8 @@ export function useGameBoard() {
     try {
       applyFrame(
         await gameApi<GameSnapshotView>(
-          `/api/game/state?channel=${encodeURIComponent(channelId)}`,
+          `/api/game/state?channel=${encodeURIComponent(channelId)}` +
+            `&session=${encodeURIComponent(sessionId)}`,
         ),
       );
     } catch (err) {
@@ -124,7 +127,9 @@ export function useGameBoard() {
       return;
     }
     if (disposed) return;
-    const source = new EventSource(gameSseUrl(channelId, ticket));
+    const source = new EventSource(
+      gameSseUrl(channelId, sessionId, ticket),
+    );
     es = source;
     source.onopen = () => {
       sseFailures = 0;

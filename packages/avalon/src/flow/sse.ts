@@ -11,12 +11,14 @@
  * removed when that request closes.
  */
 
-import { getEndedGame, getGame } from "../game/store.js";
+import { getGameBySession } from "../game/store.js";
 import { buildSnapshot } from "../game/snapshot.js";
 
 export interface SseSubscriber {
   /** Discord user id — the snapshot is computed for this viewer. */
   userId: string;
+  /** Game instance this stream is pinned to (survives a new game). */
+  sessionId: string;
   /** Write one already-encoded payload as an SSE `data:` frame. */
   send: (payload: unknown) => void;
 }
@@ -44,17 +46,19 @@ export function subscribe(
 
 /**
  * Push the current per-viewer snapshot to every subscriber on this
- * channel. A no-op when nobody is watching. When the game is gone
- * (force-stopped, or retention expired) subscribers get `{ gone:
- * true }` so the board can show a terminal state.
+ * channel. A no-op when nobody is watching. Each subscriber resolves
+ * to its OWN pinned session — so a stream watching a finished game
+ * keeps showing that game (and gets `{ gone: true }` once it ends or
+ * its retention expires) rather than jumping to a new game that
+ * started in the same channel.
  */
 export function notifyGameChanged(channelId: string): void {
   const set = channels.get(channelId);
   if (!set || set.size === 0) return;
-  const state = getGame(channelId) ?? getEndedGame(channelId);
   for (const sub of set) {
+    const game = getGameBySession(channelId, sub.sessionId);
     try {
-      sub.send(state ? buildSnapshot(state, sub.userId) : { gone: true });
+      sub.send(game ? buildSnapshot(game, sub.userId) : { gone: true });
     } catch {
       // Broken pipe — the route's close handler unsubscribes it.
     }

@@ -424,9 +424,11 @@ export function buildPlugin() {
                   components: [
                     linkButtonRow(
                       `🎲 ${t(undefined, "webui.openButton")}`,
-                      // `c` pins the board to this channel's game;
-                      // the token's guildId scopes cross-guild access.
-                      `${effectiveBase()}/?token=${res.token}&c=${channelId}`,
+                      // `c` + `s` pin the board to this exact game
+                      // instance (a later game in the same channel
+                      // won't hijack the link); the token's guildId
+                      // scopes cross-guild access.
+                      `${effectiveBase()}/?token=${res.token}&c=${channelId}&s=${game.sessionId}`,
                     ),
                   ],
                   ephemeral: true,

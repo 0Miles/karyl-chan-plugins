@@ -6,6 +6,7 @@ import {
   loadStoredManage,
   onAccessDenied,
   readChannelFromUrl,
+  readSessionFromUrl,
   readTokenFromUrl,
   setGameSession,
   setManageTokens,
@@ -62,9 +63,10 @@ export async function bootstrapApp(): Promise<void> {
     mode.value = "manual";
     return;
   }
-  // Read + strip both query params up front, exactly once — a second
+  // Read + strip the query params up front, exactly once — a second
   // reader would see them already gone.
   const channelId = readChannelFromUrl();
+  const sessionId = readSessionFromUrl();
   const urlToken = readTokenFromUrl();
 
   if (urlToken) {
@@ -86,7 +88,11 @@ export async function bootstrapApp(): Promise<void> {
       deny("遊戲板連結缺少頻道資訊，請重新執行 /avalon webui。");
       return;
     }
-    setGameSession({ token: urlToken, channelId });
+    setGameSession({
+      token: urlToken,
+      channelId,
+      sessionId: sessionId ?? "",
+    });
     mode.value = "game";
     return;
   }
