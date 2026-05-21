@@ -766,20 +766,45 @@ export async function registerWebRoutes(
     "oberon",
     "minion",
   ];
-  server.get("/api/manual", async () => ({
-    intro: t(undefined, "manual.intro"),
-    rules: (["goal", "flow", "win", "lake"] as const).map((key) => ({
-      title: t(undefined, `manual.rule.${key}.title`),
-      body: t(undefined, `manual.rule.${key}.body`),
-    })),
-    roles: MANUAL_ROLE_ORDER.map((position) => ({
-      position,
-      name: t(undefined, ROLES[position].nameKey),
-      faction: ROLES[position].faction,
-      short: t(undefined, `role.flavor.${position}`),
-      detail: t(undefined, `role.description.${position}`),
-    })),
-  }));
+  server.get("/api/manual", async () => {
+    // Resolve admin-uploaded art: one image per non-variant role,
+    // an ordered list for variant roles (loyal / minion), plus the
+    // lake asset for the Lady-of-the-Lake rule card.
+    const [artEntries, assets] = await Promise.all([
+      listArt(),
+      listAssets(),
+    ]);
+    const imagesByPosition = new Map<Position, string[]>();
+    for (const e of [...artEntries].sort(
+      (a, b) => (a.variant ?? 0) - (b.variant ?? 0),
+    )) {
+      const url = `${getEffectiveBase()}/art/${e.filename}?v=${Math.floor(e.mtimeMs)}`;
+      imagesByPosition.set(e.position, [
+        ...(imagesByPosition.get(e.position) ?? []),
+        url,
+      ]);
+    }
+    const lakeAsset = assets.find((a) => a.assetKey === "lake");
+    const lakeImage = lakeAsset
+      ? `${getEffectiveBase()}/art/${lakeAsset.filename}?v=${Math.floor(lakeAsset.mtimeMs)}`
+      : null;
+    return {
+      intro: t(undefined, "manual.intro"),
+      rules: (["goal", "flow", "win", "lake"] as const).map((key) => ({
+        title: t(undefined, `manual.rule.${key}.title`),
+        body: t(undefined, `manual.rule.${key}.body`),
+        image: key === "lake" ? lakeImage : null,
+      })),
+      roles: MANUAL_ROLE_ORDER.map((position) => ({
+        position,
+        name: t(undefined, ROLES[position].nameKey),
+        faction: ROLES[position].faction,
+        short: t(undefined, `role.flavor.${position}`),
+        detail: t(undefined, `role.description.${position}`),
+        images: imagesByPosition.get(position) ?? [],
+      })),
+    };
+  });
 
   // ── Single-page admin UI ──────────────────────────────────────────
   // The built singlefile bundle lives at dist/ui/index.html relative

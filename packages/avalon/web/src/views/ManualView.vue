@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { getManual } from "../api";
 import type { ManualData } from "../game-types";
+import ManualRoleCard from "../components/ManualRoleCard.vue";
 
 const data = ref<ManualData | null>(null);
 const failed = ref(false);
@@ -29,7 +30,7 @@ function plain(s: string): string {
     <main v-else-if="!data" class="center-msg">載入中…</main>
 
     <main v-else>
-      <h1 class="manual-title">阿瓦隆說明手冊</h1>
+      <h1 class="manual-title">說明手冊</h1>
       <p class="intro">{{ data.intro }}</p>
 
       <section
@@ -38,24 +39,24 @@ function plain(s: string): string {
         class="card"
       >
         <p class="section-title">{{ rule.title }}</p>
-        <p class="rule-body">{{ plain(rule.body) }}</p>
+        <div class="rule-content" :class="{ 'has-image': rule.image }">
+          <p class="rule-body">{{ plain(rule.body) }}</p>
+          <img
+            v-if="rule.image"
+            :src="rule.image"
+            class="rule-image"
+            alt=""
+          />
+        </div>
       </section>
 
       <h2 class="roles-heading">角色介紹</h2>
       <div class="roles">
-        <article
+        <ManualRoleCard
           v-for="role in data.roles"
           :key="role.position"
-          class="card role"
-          :class="`fac-${role.faction}`"
-        >
-          <p class="role-name">{{ role.name }}</p>
-          <p class="role-short">{{ plain(role.short) }}</p>
-          <details class="role-detail">
-            <summary>詳細說明</summary>
-            <p class="detail-body">{{ plain(role.detail) }}</p>
-          </details>
-        </article>
+          :role="role"
+        />
       </div>
     </main>
   </div>
@@ -74,10 +75,36 @@ function plain(s: string): string {
   font-size: 0.9rem;
   line-height: 1.6;
 }
-.rule-body {
+.rule-content {
   margin-top: 0.4rem;
+}
+.rule-content.has-image {
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+}
+.rule-body {
   font-size: 0.88rem;
   line-height: 1.65;
+  flex: 1;
+}
+.rule-image {
+  flex-shrink: 0;
+  width: 132px;
+  height: 132px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface-2);
+}
+@media (max-width: 520px) {
+  .rule-content.has-image {
+    flex-direction: column;
+  }
+  .rule-image {
+    width: 100%;
+    height: 160px;
+  }
 }
 .roles-heading {
   margin: 1.4rem 0 0.7rem;
@@ -87,47 +114,11 @@ function plain(s: string): string {
 .roles {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.7rem;
+  gap: 0.8rem;
 }
 @media (max-width: 640px) {
   .roles {
     grid-template-columns: 1fr;
   }
-}
-.role {
-  border-left: 4px solid var(--border-strong);
-}
-.role.fac-arthur {
-  border-left-color: var(--faction-arthur);
-}
-.role.fac-mordred {
-  border-left-color: var(--faction-mordred);
-}
-.role-name {
-  font-size: 1.05rem;
-  font-weight: 700;
-}
-.role-short {
-  margin-top: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  line-height: 1.55;
-}
-.role-detail {
-  margin-top: 0.55rem;
-}
-.role-detail summary {
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--accent-text);
-  user-select: none;
-}
-.detail-body {
-  margin-top: 0.45rem;
-  font-size: 0.84rem;
-  line-height: 1.7;
-  color: var(--text);
-  white-space: pre-wrap;
 }
 </style>

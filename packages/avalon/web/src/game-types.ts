@@ -117,7 +117,12 @@ export interface GoneSnapshot {
 /** Payload of the public GET /api/manual endpoint. */
 export interface ManualData {
   intro: string;
-  rules: Array<{ title: string; body: string }>;
+  rules: Array<{
+    title: string;
+    body: string;
+    /** Illustration URL — set for the Lady-of-the-Lake rule only. */
+    image: string | null;
+  }>;
   roles: Array<{
     position: RolePosition;
     name: string;
@@ -126,5 +131,7 @@ export interface ManualData {
     short: string;
     /** Full description — multi-paragraph. */
     detail: string;
+    /** Art URLs — one per card face; >1 for variant roles. */
+    images: string[];
   }>;
 }
