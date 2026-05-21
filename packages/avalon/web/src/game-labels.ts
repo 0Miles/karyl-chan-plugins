@@ -39,8 +39,8 @@ export const ROLE_ABILITY: Record<RolePosition, string> = {
 };
 
 export const FACTION_NAME: Record<Faction, string> = {
-  arthur: "亞瑟陣營",
-  mordred: "莫德雷德陣營",
+  arthur: "藍方",
+  mordred: "紅方",
 };
 
 export const MARKER_LABEL: Record<VisionMarker, string> = {

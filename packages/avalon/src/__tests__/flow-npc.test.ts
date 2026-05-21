@@ -189,7 +189,7 @@ describe("flow-npc-004: NPC-only game runs to a verdict", () => {
     const lastEmbed = sends[sends.length - 1].body as {
       embeds?: Array<{ title?: string }>;
     };
-    expect(lastEmbed.embeds?.[0]?.title).toMatch(/亞瑟陣營勝利|莫德雷德陣營勝利/);
+    expect(lastEmbed.embeds?.[0]?.title).toMatch(/藍方勝利|紅方勝利/);
   });
 });
 
