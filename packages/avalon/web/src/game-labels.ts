@@ -51,9 +51,11 @@ export const MARKER_LABEL: Record<VisionMarker, string> = {
   unknown: "未知",
 };
 
-/** CSS colour per vision marker — the board's faction palette. */
-export const MARKER_COLOR: Record<VisionMarker, string> = {
-  self: "var(--accent)",
+// CSS colour per vision marker — the board's faction palette. The
+// `self` entry is a fallback; `markerColor` resolves the viewer's
+// own seat to their actual faction colour instead.
+const MARKER_COLOR: Record<VisionMarker, string> = {
+  self: "var(--faction-arthur)",
   red: "var(--faction-mordred)",
   blue: "var(--faction-arthur)",
   purple: "#8b5cf6",
@@ -62,10 +64,16 @@ export const MARKER_COLOR: Record<VisionMarker, string> = {
 
 /**
  * Colour for a player's vision marker. Shared by the player list and
- * the history items so a seat's faction reads consistently across
- * the board.
+ * the history items so a seat reads consistently across the board.
+ * The viewer's own seat uses their faction colour (red/blue) rather
+ * than the brand accent — the whole board reads in faction colours.
  */
 export function markerColor(player: PlayerView): string {
+  if (player.marker === "self") {
+    return player.faction === "mordred"
+      ? "var(--faction-mordred)"
+      : "var(--faction-arthur)";
+  }
   return MARKER_COLOR[player.marker];
 }
 

@@ -32,6 +32,14 @@ function initials(name: string): string {
         'player--self': p.seat === viewerSeat,
         'player--mission': p.onMission,
       }"
+      :style="
+        p.seat === viewerSeat
+          ? {
+              borderColor: markerColor(p),
+              background: `color-mix(in srgb, ${markerColor(p)} 12%, transparent)`,
+            }
+          : {}
+      "
     >
       <div class="avatar" :style="{ borderColor: markerColor(p) }">
         <img v-if="p.avatarUrl" :src="p.avatarUrl" :alt="p.displayName" />
@@ -93,10 +101,8 @@ function initials(name: string): string {
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
 }
-.player--self {
-  border-color: var(--accent);
-  background: var(--accent-bg);
-}
+/* The viewer's own row is tinted with their faction colour — see the
+   inline style bound from markerColor() in the template. */
 .player--mission {
   box-shadow: inset 3px 0 0 var(--faction-arthur);
 }
