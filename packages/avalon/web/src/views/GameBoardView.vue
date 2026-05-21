@@ -59,13 +59,6 @@ const missions = computed(() => {
 
 <template>
   <div class="app-wrap">
-    <header class="app-header">
-      <h1>阿瓦隆遊戲板</h1>
-      <span v-if="statusPill" class="pill" :class="statusPill.cls">
-        {{ statusPill.text }}
-      </span>
-    </header>
-
     <main v-if="status === 'denied'" class="center-msg">
       <h2>無法載入遊戲板</h2>
       <p>{{ deniedMessage }}</p>
@@ -84,7 +77,12 @@ const missions = computed(() => {
       <section class="board-main">
         <!-- phase + mission track -->
         <div class="card">
-          <p class="phase">{{ phase }}</p>
+          <div class="phase-row">
+            <p class="phase">{{ phase }}</p>
+            <span v-if="statusPill" class="pill" :class="statusPill.cls">
+              {{ statusPill.text }}
+            </span>
+          </div>
           <p
             v-if="snapshot.stage !== 'ended' && snapshot.consecutiveRejections > 0"
             class="rejections"
@@ -151,12 +149,19 @@ const missions = computed(() => {
 </template>
 
 <style scoped>
+.phase-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
 .pill {
   font-size: 0.74rem;
   font-weight: 600;
   border-radius: 999px;
   padding: 0.18rem 0.6rem;
   border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .pill--live {
   color: var(--success);
