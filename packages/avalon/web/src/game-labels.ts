@@ -70,8 +70,6 @@ export const END_REASON_LABEL: Record<string, string> = {
 
 /** A per-event marker shown on a history player item. */
 export type HistoryTagKind =
-  | "leader"
-  | "mission"
   | "yes"
   | "no"
   | "holder"
@@ -89,70 +87,82 @@ export interface HistoryPlayerRef {
   tags: HistoryTag[];
 }
 
+/**
+ * A labelled set of players within an event card. Most events have a
+ * single unlabelled group; team-proposed splits the leader and the
+ * proposed team into two labelled groups.
+ */
+export interface HistoryGroup {
+  label?: string;
+  players: HistoryPlayerRef[];
+}
+
 /** One history event rendered as an independent card. */
 export interface EventCard {
   icon: string;
   title: string;
   /** Optional secondary line (tally, target role, …). */
   note?: string;
-  /** Players the event involves — rendered as avatar + name items. */
-  players: HistoryPlayerRef[];
+  /** Player groups the event involves — rendered as avatar + name items. */
+  groups: HistoryGroup[];
 }
 
 /**
  * Describe a timeline event as a card: a title, an optional note, and
- * the players it involves with per-event markers. The component
- * resolves each `seat` to an avatar + display name.
+ * the player groups it involves. The component resolves each `seat`
+ * to an avatar + display name.
  */
 export function describeEvent(ev: GameEvent): EventCard {
   switch (ev.kind) {
-    case "team-proposed": {
-      // One item per involved seat; the leader who is also on the
-      // team carries both markers.
-      const bySeat = new Map<number, HistoryTag[]>();
-      for (const seat of ev.memberSeats) {
-        bySeat.set(seat, [{ label: "在隊", kind: "mission" }]);
-      }
-      bySeat.set(ev.leaderSeat, [
-        { label: "隊長", kind: "leader" },
-        ...(bySeat.get(ev.leaderSeat) ?? []),
-      ]);
+    case "team-proposed":
       return {
         icon: "📋",
         title: `第 ${ev.round} 回合 · 隊長提名隊伍`,
-        players: [...bySeat.entries()]
-          .sort((a, b) => a[0] - b[0])
-          .map(([seat, tags]) => ({ seat, tags })),
+        // Leader and proposed team shown as two separate groups.
+        groups: [
+          { label: "隊長", players: [{ seat: ev.leaderSeat, tags: [] }] },
+          {
+            label: "提名隊伍",
+            players: ev.memberSeats.map((seat) => ({ seat, tags: [] })),
+          },
+        ],
       };
-    }
     case "public-vote":
       return {
         icon: ev.approved ? "✅" : "🚫",
         title: `第 ${ev.round} 回合 · 隊伍投票${ev.approved ? "通過" : "遭否決"}`,
         note: `贊成 ${ev.yes} · 反對 ${ev.no}`,
-        players: ev.ballots.map((b) => ({
-          seat: b.seat,
-          tags: [
-            b.vote === "yes"
-              ? { label: "同意", kind: "yes" }
-              : { label: "反對", kind: "no" },
-          ],
-        })),
+        groups: [
+          {
+            players: ev.ballots.map((b) => ({
+              seat: b.seat,
+              tags: [
+                b.vote === "yes"
+                  ? { label: "同意", kind: "yes" }
+                  : { label: "反對", kind: "no" },
+              ],
+            })),
+          },
+        ],
       };
     case "mission-result":
       return {
         icon: ev.result === "success" ? "🟦" : "🟥",
         title: `第 ${ev.round} 回合 · 任務${ev.result === "success" ? "成功" : "失敗"}`,
         note: ev.failCount > 0 ? `${ev.failCount} 張失敗票` : "無失敗票",
-        players: [],
+        groups: [],
       };
     case "lake-used":
       return {
         icon: "🔮",
         title: "湖中女神查驗",
-        players: [
-          { seat: ev.holderSeat, tags: [{ label: "查驗者", kind: "holder" }] },
-          { seat: ev.targetSeat, tags: [{ label: "被查驗", kind: "target" }] },
+        groups: [
+          {
+            players: [
+              { seat: ev.holderSeat, tags: [{ label: "查驗者", kind: "holder" }] },
+              { seat: ev.targetSeat, tags: [{ label: "被查驗", kind: "target" }] },
+            ],
+          },
         ],
       };
     case "assassinate":
@@ -160,19 +170,23 @@ export function describeEvent(ev: GameEvent): EventCard {
         icon: "🗡",
         title: "刺客刺殺",
         note: `目標真實身分:${ROLE_NAME[ev.targetRole]}`,
-        players: [
+        groups: [
           {
-            seat: ev.assassinSeat,
-            tags: [{ label: "刺客", kind: "assassin" }],
+            players: [
+              {
+                seat: ev.assassinSeat,
+                tags: [{ label: "刺客", kind: "assassin" }],
+              },
+              { seat: ev.targetSeat, tags: [{ label: "被刺殺", kind: "target" }] },
+            ],
           },
-          { seat: ev.targetSeat, tags: [{ label: "被刺殺", kind: "target" }] },
         ],
       };
     case "game-end":
       return {
         icon: ev.winner === "arthur" ? "🏆" : "💀",
         title: `遊戲結束 · ${FACTION_NAME[ev.winner]}勝利`,
-        players: [],
+        groups: [],
       };
   }
 }

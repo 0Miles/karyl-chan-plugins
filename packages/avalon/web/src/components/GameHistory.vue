@@ -13,13 +13,26 @@ const bySeat = computed(
   () => new Map(props.players.map((p) => [p.seat, p])),
 );
 
-/** One card per event, newest first. */
+/** One card per event, newest first, with each seat resolved. */
 const cards = computed(() =>
-  [...props.events].reverse().map((ev) => ({
-    seq: ev.seq,
-    at: ev.at,
-    ...describeEvent(ev),
-  })),
+  [...props.events].reverse().map((ev) => {
+    const card = describeEvent(ev);
+    return {
+      seq: ev.seq,
+      at: ev.at,
+      icon: card.icon,
+      title: card.title,
+      note: card.note,
+      groups: card.groups.map((group) => ({
+        label: group.label,
+        players: group.players.map((ref) => ({
+          seat: ref.seat,
+          tags: ref.tags,
+          player: bySeat.value.get(ref.seat) ?? null,
+        })),
+      })),
+    };
+  }),
 );
 
 function initials(name: string): string {
@@ -46,35 +59,42 @@ function clockOf(ms: number): string {
         </div>
         <p v-if="card.note" class="note">{{ card.note }}</p>
 
-        <ul v-if="card.players.length" class="players">
-          <li v-for="ref in card.players" :key="ref.seat" class="player">
-            <span class="avatar">
-              <img
-                v-if="bySeat.get(ref.seat)?.avatarUrl"
-                :src="bySeat.get(ref.seat)!.avatarUrl!"
-                alt=""
-              />
-              <span v-else class="avatar-fallback">
-                {{
-                  bySeat.get(ref.seat)?.isNpc
-                    ? "🤖"
-                    : initials(bySeat.get(ref.seat)?.displayName ?? "?")
-                }}
+        <div
+          v-for="(group, gi) in card.groups"
+          :key="gi"
+          class="group"
+        >
+          <p v-if="group.label" class="group-label">{{ group.label }}</p>
+          <ul class="players">
+            <li v-for="ref in group.players" :key="ref.seat" class="player">
+              <span class="avatar">
+                <img
+                  v-if="ref.player?.avatarUrl"
+                  :src="ref.player.avatarUrl"
+                  alt=""
+                />
+                <span v-else class="avatar-fallback">
+                  {{
+                    ref.player?.isNpc
+                      ? "🤖"
+                      : initials(ref.player?.displayName ?? "?")
+                  }}
+                </span>
               </span>
-            </span>
-            <span class="name">
-              {{ bySeat.get(ref.seat)?.displayName ?? `#${ref.seat + 1}` }}
-            </span>
-            <span
-              v-for="tag in ref.tags"
-              :key="tag.label"
-              class="tag"
-              :class="`tag--${tag.kind}`"
-            >
-              {{ tag.label }}
-            </span>
-          </li>
-        </ul>
+              <span class="name">
+                {{ ref.player?.displayName ?? `#${ref.seat + 1}` }}
+              </span>
+              <span
+                v-for="tag in ref.tags"
+                :key="tag.label"
+                class="tag"
+                :class="`tag--${tag.kind}`"
+              >
+                {{ tag.label }}
+              </span>
+            </li>
+          </ul>
+        </div>
       </li>
     </ol>
   </div>
@@ -117,12 +137,20 @@ function clockOf(ms: number): string {
   color: var(--text-muted);
   margin-top: 0.25rem;
 }
+.group {
+  margin-top: 0.5rem;
+}
+.group-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  margin-bottom: 0.28rem;
+}
 .players {
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 0.32rem;
-  margin-top: 0.5rem;
 }
 .player {
   display: flex;
@@ -166,14 +194,6 @@ function clockOf(ms: number): string {
   border-radius: 4px;
   padding: 0.05rem 0.34rem;
   border: 1px solid transparent;
-}
-.tag--leader {
-  color: var(--accent-text);
-  background: var(--accent-bg);
-}
-.tag--mission {
-  color: var(--faction-arthur);
-  background: color-mix(in srgb, var(--faction-arthur) 14%, transparent);
 }
 .tag--yes {
   color: var(--success);
